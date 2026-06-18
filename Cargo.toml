@@ -8,7 +8,7 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
-up-rust = { git = "ssh://git@github.com/PLeVasseur/up-rust.git", rev = "815fbeb170f85e3bb33e98c63cfc4a2667dfb1f9", default-features = false }
+up-rust = { git = "ssh://git@github.com/PLeVasseur/up-rust.git", rev = "41c43e1b7912ec55ef6d515fa216e9bbc7466f58", default-features = false }
 
 [dev-dependencies]
 trybuild = "1.0.114"
