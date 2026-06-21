@@ -7,9 +7,9 @@
 use std::{io::Read, marker::PhantomData};
 
 use up_rust::{
-    DecodePayload, EncodePayload, PayloadEncoding, PayloadFormat, PayloadLayout, ReadDecodePayload,
-    UWire, UWireError, WireIdentity, NATIVE_PREFIX_METADATA_LAYOUT_ID, XCDR_V2_PAYLOAD_FAMILY_ID,
-    XCDR_V2_WIRE_ID,
+    DecodePayload, EncodePayload, NativePrefixProtobufMetadataCodec, PayloadEncoding,
+    PayloadFormat, PayloadLayout, ReadDecodePayload, UWire, UWireError, UWireTransport,
+    WireIdentity, NATIVE_PREFIX_METADATA_LAYOUT_ID, XCDR_V2_PAYLOAD_FAMILY_ID, XCDR_V2_WIRE_ID,
 };
 
 const XCDR2_LE_FIXTURE_PREFIX: [u8; 4] = [0x06, 0x00, 0x00, 0x00];
@@ -37,6 +37,25 @@ pub const VEHICLE_SIGNAL_V1_GOLDEN_BYTES: [u8; VehicleSignalV1::ENCODED_LEN] = [
 /// External selected wire marker for constrained XCDRv2 payloads.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct XcdrV2Wire;
+
+/// Explicit compatibility transport shape for XCDRv2 payloads with the
+/// native-prefix/protobuf metadata codec currently provided by `up-rust`.
+///
+/// This type alias is intentionally not named as XCDRv2 metadata. It composes
+/// XCDRv2 payload encoding with the shared native-prefix/protobuf metadata
+/// codec. A future real XCDRv2 metadata codec should use a distinct type and
+/// metadata layout identity.
+pub type XcdrV2NativePrefixProtobufTransport<TCore> =
+    UWireTransport<TCore, XcdrV2Wire, NativePrefixProtobufMetadataCodec>;
+
+/// Builds an explicit compatibility transport for XCDRv2 payloads with
+/// native-prefix/protobuf metadata.
+#[must_use]
+pub fn with_xcdr_v2_native_prefix_protobuf_metadata<TCore>(
+    core: TCore,
+) -> XcdrV2NativePrefixProtobufTransport<TCore> {
+    UWireTransport::new(core, XcdrV2Wire, NativePrefixProtobufMetadataCodec)
+}
 
 impl UWire for XcdrV2Wire {
     const WIRE_ID: WireIdentity = XCDR_V2_WIRE_ID;
@@ -242,7 +261,7 @@ mod tests {
     use std::io::Cursor;
 
     use super::*;
-    use up_rust::{PayloadCodec, UWireMetadata};
+    use up_rust::{PayloadCodec, UWireMetadataCodec};
 
     #[test]
     fn vehicle_signal_golden_bytes_are_frozen() {
@@ -297,8 +316,12 @@ mod tests {
         assert_eq!(XcdrV2Wire::PAYLOAD_FAMILY_ID, XCDR_V2_PAYLOAD_FAMILY_ID);
 
         let metadata = crate_metadata();
-        let encoded = XcdrV2Wire::encode_frame_metadata(&metadata).expect("encode metadata");
-        let decoded = XcdrV2Wire::decode_frame_metadata(&encoded).expect("decode metadata");
+        let encoded = NativePrefixProtobufMetadataCodec
+            .encode_frame_metadata(XcdrV2Wire::metadata_context(), &metadata)
+            .expect("encode metadata");
+        let decoded = NativePrefixProtobufMetadataCodec
+            .decode_frame_metadata(XcdrV2Wire::metadata_context(), &encoded)
+            .expect("decode metadata");
 
         assert_eq!(decoded, metadata);
         assert_eq!(

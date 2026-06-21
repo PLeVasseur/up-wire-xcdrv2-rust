@@ -8,7 +8,7 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
-up-rust = { git = "ssh://git@github.com/PLeVasseur/up-rust.git", rev = "d40e4b01947e3f61d29c3edc8136ba3084e344be", default-features = false }
+up-rust = { git = "ssh://git@github.com/PLeVasseur/up-rust.git", rev = "d00aa18f0dccee1b9271123cd546de62acfccab3", default-features = false, features = ["selected-wire-protobuf-metadata", "selected-wire-transport-adapter"] }
 
 [dev-dependencies]
 trybuild = "1.0.114"
