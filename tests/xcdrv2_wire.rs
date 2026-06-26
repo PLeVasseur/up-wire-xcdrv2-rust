@@ -28,7 +28,7 @@ fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
         .expect("prepare selected-wire TX");
 
     assert_eq!(prepared.payload_len(), VEHICLE_SIGNAL_V1_GOLDEN_BYTES.len());
-    assert_eq!(prepared.payload_alignment(), 1);
+    assert_eq!(prepared.payload_alignment_proof().as_usize(), 1);
     let decoded_metadata = NativePrefixProtobufMetadataCodec
         .decode_frame_metadata(XcdrV2Wire::metadata_context(), prepared.encoded_metadata())
         .expect("decode prepared metadata");
@@ -37,7 +37,7 @@ fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
     let mut tx = UVecTxBuffer::with_alignment(
         prepared.metadata().clone(),
         prepared.payload_len(),
-        prepared.payload_alignment(),
+        prepared.payload_alignment_proof().as_usize(),
     )
     .expect("loan vector TX storage");
     XcdrV2Wire::encode_payload(&VEHICLE_SIGNAL_V1_GOLDEN_VALUE, tx.payload_mut())
