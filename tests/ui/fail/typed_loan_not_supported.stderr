@@ -5,11 +5,11 @@ error[E0277]: the trait bound `XcdrV2Wire: UWireLoan<VehicleSignalV1>` is not sa
     |                        ^^^^^^^^^^ the trait `UWireLoan<VehicleSignalV1>` is not implemented for `XcdrV2Wire`
     |
 help: the trait `UWireLoan<T>` is implemented for `StableContainerWireFormat`
-   --> /home/pete.levasseur/.cargo/git/checkouts/up-rust-93e184482c2b39f2/b16c4cd/src/wire.rs:448:1
+   --> /home/pete.levasseur/.cargo/git/checkouts/up-rust-93e184482c2b39f2/2b36c9a/src/wire.rs:463:1
     |
-448 | / impl<T> UWireLoan<T> for StableContainerWireFormat
-449 | | where
-450 | |     T: ByteBackedStablePayload + Default,
+463 | / impl<T> UWireLoan<T> for StableContainerWireFormat
+464 | | where
+465 | |     T: ByteBackedStablePayload + Default,
     | |_________________________________________^
 note: required by a bound in `needs_typed_loan`
    --> tests/ui/fail/typed_loan_not_supported.rs:12:8
