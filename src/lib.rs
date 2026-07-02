@@ -7,8 +7,8 @@
 use std::{io::Read, marker::PhantomData};
 
 use up_rust::{
-    DecodePayload, EncodePayload, NativePrefixProtobufMetadataCodec, PayloadEncoding,
-    PayloadFormat, PayloadLayout, ReadDecodePayload, UWire, UWireError, UWireTransport,
+    DecodePayload, EncodePayload, PayloadEncoding, PayloadFormat, PayloadLayout, ReadDecodePayload,
+    UNativePrefixWireTransport, UWire, UWireError, UWirePayload, UWithNativePrefixWire,
     WireIdentity, NATIVE_PREFIX_METADATA_LAYOUT_ID, XCDR_V2_PAYLOAD_FAMILY_ID, XCDR_V2_WIRE_ID,
 };
 
@@ -38,23 +38,17 @@ pub const VEHICLE_SIGNAL_V1_GOLDEN_BYTES: [u8; VehicleSignalV1::ENCODED_LEN] = [
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct XcdrV2Wire;
 
-/// Explicit compatibility transport shape for XCDRv2 payloads with the
-/// native-prefix/protobuf metadata codec currently provided by `up-rust`.
+/// Compatibility transport shape for XCDRv2 payloads with native-prefix metadata.
 ///
-/// This type alias is intentionally not named as XCDRv2 metadata. It composes
-/// XCDRv2 payload encoding with the shared native-prefix/protobuf metadata
-/// codec. A future real XCDRv2 metadata codec should use a distinct type and
+/// This composes XCDRv2 payload encoding with the shared native-prefix metadata
+/// layout. A future real XCDRv2 metadata codec should use a distinct type and
 /// metadata layout identity.
-pub type XcdrV2NativePrefixProtobufTransport<TCore> =
-    UWireTransport<TCore, XcdrV2Wire, NativePrefixProtobufMetadataCodec>;
+pub type XcdrV2NativePrefixTransport<TCore> = UNativePrefixWireTransport<TCore, XcdrV2Wire>;
 
-/// Builds an explicit compatibility transport for XCDRv2 payloads with
-/// native-prefix/protobuf metadata.
+/// Builds a compatibility transport for XCDRv2 payloads with native-prefix metadata.
 #[must_use]
-pub fn with_xcdr_v2_native_prefix_protobuf_metadata<TCore>(
-    core: TCore,
-) -> XcdrV2NativePrefixProtobufTransport<TCore> {
-    UWireTransport::new(core, XcdrV2Wire, NativePrefixProtobufMetadataCodec)
+pub fn with_xcdr_v2_native_prefix<TCore>(core: TCore) -> XcdrV2NativePrefixTransport<TCore> {
+    core.into_native_prefix_wire_transport(XcdrV2Wire)
 }
 
 impl UWire for XcdrV2Wire {
@@ -73,6 +67,10 @@ impl PayloadFormat for XcdrV2Wire {
         PayloadEncoding::custom(XCDR_V2_ENCODING_ID, VEHICLE_SIGNAL_V1_CONTENT_TYPE)
             .expect("valid XCDRv2 payload encoding")
     }
+}
+
+impl UWirePayload<VehicleSignalV1> for XcdrV2Wire {
+    type Codec = Self;
 }
 
 /// Types with explicit support in this constrained XCDRv2 fixture adapter.
@@ -261,7 +259,7 @@ mod tests {
     use std::io::Cursor;
 
     use super::*;
-    use up_rust::{PayloadCodec, UWireMetadataCodec};
+    use up_rust::{NativePrefixProtobufMetadataCodec, PayloadCodec, UWireMetadataCodec};
 
     #[test]
     fn vehicle_signal_golden_bytes_are_frozen() {

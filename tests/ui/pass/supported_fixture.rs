@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use up_rust::{DecodePayload, EncodePayload, ReadDecodePayload, UWireReadDecode};
+use up_rust::{DecodePayload, EncodePayload, ReadDecodePayload, UWirePayload, UWireReadDecode};
 use up_wire_xcdrv2::{VehicleSignalV1, XcdrV2Wire, VEHICLE_SIGNAL_V1_GOLDEN_VALUE};
 
 fn assert_reader_decode<W>()
@@ -13,8 +13,15 @@ where
 {
 }
 
+fn assert_selected_wire_payload<W>()
+where
+    W: UWirePayload<VehicleSignalV1>,
+{
+}
+
 fn main() {
     assert_reader_decode::<XcdrV2Wire>();
+    assert_selected_wire_payload::<XcdrV2Wire>();
 
     let encoded = XcdrV2Wire::encode_payload_owned(&VEHICLE_SIGNAL_V1_GOLDEN_VALUE)
         .expect("encode supported XCDRv2 fixture");
