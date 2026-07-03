@@ -1,21 +1,21 @@
 error[E0277]: the trait bound `XcdrV2Wire: LoanPayload<VehicleSignalV1>` is not satisfied
-    --> tests/ui/fail/typed_loan_not_supported.rs:18:24
+    --> tests/ui/fail/typed_loan_not_supported.rs:19:24
      |
-  18 |     needs_typed_loan::<XcdrV2Wire>();
+  19 |     needs_typed_loan::<XcdrV2Wire>();
      |                        ^^^^^^^^^^ the trait `LoanPayload<VehicleSignalV1>` is not implemented for `XcdrV2Wire`
      |
 help: the trait `LoanPayload<T>` is implemented for `StableContainerPayload<T>`
-    --> /home/pete.levasseur/.cargo/git/checkouts/up-rust-93e184482c2b39f2/98f62b4/src/payload.rs:1451:1
+    --> /home/pete.levasseur/.cargo/git/checkouts/up-rust-93e184482c2b39f2/b0b6f79/src/payload.rs:1451:1
      |
 1451 | / unsafe impl<T> LoanPayload<T> for StableContainerPayload<T>
 1452 | | where
 1453 | |     T: ByteBackedStablePayload + Default,
      | |_________________________________________^
 note: required by a bound in `needs_typed_loan`
-    --> tests/ui/fail/typed_loan_not_supported.rs:13:50
+    --> tests/ui/fail/typed_loan_not_supported.rs:14:50
      |
-  10 | fn needs_typed_loan<W>()
+  11 | fn needs_typed_loan<W>()
      |    ---------------- required by a bound in this function
 ...
-  13 |     <W as UWirePayload<VehicleSignalV1>>::Codec: LoanPayload<VehicleSignalV1>,
+  14 |     <W as UWirePayload<VehicleSignalV1>>::Codec: LoanPayload<VehicleSignalV1>,
      |                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `needs_typed_loan`

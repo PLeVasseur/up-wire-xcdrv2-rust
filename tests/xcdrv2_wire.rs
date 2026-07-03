@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+use up_rust::transport_implementer_api::PreparedTxLoanSpec;
+use up_rust::wire_implementer_api::{NativePrefixProtobufMetadataCodec, UWire, UWireMetadataCodec};
 use up_rust::{
-    EncodePayload, NativePrefixProtobufMetadataCodec, PayloadCodec, PreparedTxLoanSpec,
-    UFrameMetadata, UMessageBuilder, UTxBuffer, UTxLoanSpec, UUri, UVecTxBuffer, UWire,
-    UWireMetadataCodec, ValidatedTxLoanSpec,
+    EncodePayload, PayloadCodec, UFrameMetadata, UMessageBuilder, UTxBuffer, UTxLoanSpec, UUri,
+    UVecTxBuffer, ValidatedTxLoanSpec,
 };
 use up_wire_xcdrv2::{
     VehicleSignalV1, XcdrV2Wire, VEHICLE_SIGNAL_V1_GOLDEN_BYTES, VEHICLE_SIGNAL_V1_GOLDEN_VALUE,
@@ -50,10 +51,10 @@ fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
 fn public_trait_bounds_accept_supported_fixture() {
     fn assert_supported<W>()
     where
-        W: up_rust::UWire
-            + up_rust::UWireEncode<VehicleSignalV1>
-            + for<'a> up_rust::UWireDecode<'a, VehicleSignalV1>
-            + up_rust::UWireReadDecode<VehicleSignalV1>,
+        W: up_rust::wire_implementer_api::UWire
+            + up_rust::wire_implementer_api::UWireEncode<VehicleSignalV1>
+            + for<'a> up_rust::wire_implementer_api::UWireDecode<'a, VehicleSignalV1>
+            + up_rust::wire_implementer_api::UWireReadDecode<VehicleSignalV1>,
     {
     }
 

@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use up_rust::{DecodePayload, EncodePayload, ReadDecodePayload, UWirePayload, UWireReadDecode};
+use up_rust::{DecodePayload, EncodePayload, ReadDecodePayload};
+use up_rust::wire_implementer_api::{UWirePayload, UWireReadDecode};
 use up_wire_xcdrv2::{VehicleSignalV1, XcdrV2Wire, VEHICLE_SIGNAL_V1_GOLDEN_VALUE};
 
 fn assert_reader_decode<W>()

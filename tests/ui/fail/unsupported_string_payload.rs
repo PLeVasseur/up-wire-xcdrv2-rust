@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use up_rust::UWireEncode;
+use up_rust::wire_implementer_api::UWireEncode;
 use up_wire_xcdrv2::XcdrV2Wire;
 
 struct UnsupportedStringPayload {

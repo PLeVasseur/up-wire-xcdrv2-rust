@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use up_rust::{LoanPayload, UWirePayload};
+use up_rust::LoanPayload;
+use up_rust::wire_implementer_api::UWirePayload;
 use up_wire_xcdrv2::{VehicleSignalV1, XcdrV2Wire};
 
 fn needs_typed_loan<W>()

@@ -6,10 +6,14 @@
 
 use std::{io::Read, marker::PhantomData};
 
+use up_rust::selected_wire_user_api::{UNativePrefixWireTransport, UWithNativePrefixWire};
+use up_rust::wire_implementer_api::{
+    UProtocolNativeWire, UWire, UWirePayload, WireIdentity, NATIVE_PREFIX_METADATA_LAYOUT_ID,
+    XCDR_V2_PAYLOAD_FAMILY_ID, XCDR_V2_WIRE_ID,
+};
 use up_rust::{
     DecodePayload, EncodePayload, PayloadEncoding, PayloadFormat, PayloadLayout, ReadDecodePayload,
-    UNativePrefixWireTransport, UWire, UWireError, UWirePayload, UWithNativePrefixWire,
-    WireIdentity, NATIVE_PREFIX_METADATA_LAYOUT_ID, XCDR_V2_PAYLOAD_FAMILY_ID, XCDR_V2_WIRE_ID,
+    UWireError,
 };
 
 const XCDR2_LE_FIXTURE_PREFIX: [u8; 4] = [0x06, 0x00, 0x00, 0x00];
@@ -55,7 +59,7 @@ impl UWire for XcdrV2Wire {
     const WIRE_ID: WireIdentity = XCDR_V2_WIRE_ID;
     const PAYLOAD_FAMILY_ID: WireIdentity = XCDR_V2_PAYLOAD_FAMILY_ID;
     const METADATA_LAYOUT_ID: WireIdentity = NATIVE_PREFIX_METADATA_LAYOUT_ID;
-    const FORMAT_VERSION: u16 = up_rust::wire::FORMAT_VERSION;
+    const FORMAT_VERSION: u16 = UProtocolNativeWire::FORMAT_VERSION;
 }
 
 impl PayloadFormat for XcdrV2Wire {
@@ -259,7 +263,8 @@ mod tests {
     use std::io::Cursor;
 
     use super::*;
-    use up_rust::{NativePrefixProtobufMetadataCodec, PayloadCodec, UWireMetadataCodec};
+    use up_rust::wire_implementer_api::{NativePrefixProtobufMetadataCodec, UWireMetadataCodec};
+    use up_rust::PayloadCodec;
 
     #[test]
     fn vehicle_signal_golden_bytes_are_frozen() {
