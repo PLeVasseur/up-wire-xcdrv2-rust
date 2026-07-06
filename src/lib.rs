@@ -1,10 +1,19 @@
-//! External XCDRv2 selected wire proof for the userializer first wave.
-//!
-//! This crate deliberately supports one crate-owned integer fixture. It proves
-//! that production XCDRv2 can live outside `up-rust` while consuming only public
-//! selected-wire traits and native-prefix metadata APIs.
+/********************************************************************************
+ * Copyright (c) 2026 Contributors to the Eclipse Foundation
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ ********************************************************************************/
 
-use std::{io::Read, marker::PhantomData};
+//! XCDRv2 selected-wire support for typed uProtocol payloads.
+//!
+//! The public derive path is `#[derive(up_wire_xcdrv2::XcdrV2Type)]` on a
+//! named-field Rust struct. The derive implements a typed CDR/XCDRv2 body
+//! serializer/deserializer. `XcdrV2Wire` then exposes that type through the
+//! normal up-rust selected-wire payload traits.
+
+extern crate self as up_wire_xcdrv2;
+
+use std::{convert::TryInto, io::Read, marker::PhantomData};
 
 use up_rust::selected_wire_user_api::{UNativePrefixWireTransport, UWithNativePrefixWire};
 use up_rust::wire_implementer_api::{
@@ -16,16 +25,18 @@ use up_rust::{
     UWireError,
 };
 
-const XCDR2_LE_FIXTURE_PREFIX: [u8; 4] = [0x06, 0x00, 0x00, 0x00];
+pub use up_wire_xcdrv2_macros::XcdrV2Type;
 
-/// Payload encoding id used by the constrained first-wave XCDRv2 fixture.
+const XCDR2_LE_PLAIN_CDR2_ENCAPSULATION: [u8; 4] = [0x06, 0x00, 0x00, 0x00];
+
+/// Payload encoding id used by the XCDRv2 selected-wire adapter.
 pub const XCDR_V2_ENCODING_ID: &str = "up.xcdr-v2";
 
-/// Payload content type for the frozen `VehicleSignalV1` fixture.
-pub const VEHICLE_SIGNAL_V1_CONTENT_TYPE: &str =
-    "application/vnd.uprotocol.xcdr-v2;type=\"VehicleSignalV1\";endianness=little;version=2";
+/// Generic content type used for typed XCDRv2 payloads.
+pub const XCDR_V2_CONTENT_TYPE: &str =
+    "application/vnd.uprotocol.xcdr-v2;endianness=little;version=2";
 
-/// Frozen golden value used by USR-05X tests and downstream smoke proofs.
+/// Frozen value retained for compatibility tests and examples.
 pub const VEHICLE_SIGNAL_V1_GOLDEN_VALUE: VehicleSignalV1 = VehicleSignalV1 {
     vehicle_id: 0x0000_1234,
     signal_id: 0x0007,
@@ -33,20 +44,16 @@ pub const VEHICLE_SIGNAL_V1_GOLDEN_VALUE: VehicleSignalV1 = VehicleSignalV1 {
     value: -12345,
 };
 
-/// Frozen little-endian XCDRv2 fixture bytes for [`VEHICLE_SIGNAL_V1_GOLDEN_VALUE`].
+/// Frozen little-endian XCDRv2 bytes for [`VEHICLE_SIGNAL_V1_GOLDEN_VALUE`].
 pub const VEHICLE_SIGNAL_V1_GOLDEN_BYTES: [u8; VehicleSignalV1::ENCODED_LEN] = [
     0x06, 0x00, 0x00, 0x00, 0x34, 0x12, 0x00, 0x00, 0x07, 0x00, 0x2a, 0x00, 0xc7, 0xcf, 0xff, 0xff,
 ];
 
-/// External selected wire marker for constrained XCDRv2 payloads.
+/// External selected wire marker for XCDRv2 payloads.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct XcdrV2Wire;
 
 /// Compatibility transport shape for XCDRv2 payloads with native-prefix metadata.
-///
-/// This composes XCDRv2 payload encoding with the shared native-prefix metadata
-/// layout. A future real XCDRv2 metadata codec should use a distinct type and
-/// metadata layout identity.
 pub type XcdrV2NativePrefixTransport<TCore> = UNativePrefixWireTransport<TCore, XcdrV2Wire>;
 
 /// Builds a compatibility transport for XCDRv2 payloads with native-prefix metadata.
@@ -64,34 +71,231 @@ impl UWire for XcdrV2Wire {
 
 impl PayloadFormat for XcdrV2Wire {
     fn name() -> &'static str {
-        "xcdr-v2-vehicle-signal-v1"
+        "xcdr-v2"
     }
 
     fn encoding() -> PayloadEncoding {
-        PayloadEncoding::custom(XCDR_V2_ENCODING_ID, VEHICLE_SIGNAL_V1_CONTENT_TYPE)
+        PayloadEncoding::custom(XCDR_V2_ENCODING_ID, XCDR_V2_CONTENT_TYPE)
             .expect("valid XCDRv2 payload encoding")
     }
 }
 
-impl UWirePayload<VehicleSignalV1> for XcdrV2Wire {
+impl<T> UWirePayload<T> for XcdrV2Wire
+where
+    T: XcdrV2Type,
+{
     type Codec = Self;
 }
 
-/// Types with explicit support in this constrained XCDRv2 fixture adapter.
-pub trait XcdrV2Mappable: Sized {
-    /// Stable fixture type name used in diagnostics and content type decisions.
-    const TYPE_NAME: &'static str;
-    /// Exact serialized length for this first-wave fixture encoding.
-    const ENCODED_LEN: usize;
+/// Top-level typed XCDRv2 payload contract.
+pub trait XcdrV2Type: XcdrV2Struct + Sized {
+    /// Encodes this value into owned XCDRv2 bytes including the PLAIN_CDR2 encapsulation.
+    fn encode_xcdr_v2_owned(&self) -> Result<Vec<u8>, UWireError> {
+        let mut encoder = XcdrV2Encoder::new();
+        encoder.write_encapsulation();
+        self.encode_xcdr_v2_fields(&mut encoder)?;
+        Ok(encoder.into_bytes())
+    }
 
-    /// Encodes `self` into the frozen little-endian XCDRv2 fixture bytes.
-    fn encode_xcdr_v2(&self, dst: &mut [u8]) -> Result<(), UWireError>;
+    /// Encodes this value into a caller-provided XCDRv2 buffer.
+    fn encode_xcdr_v2(&self, dst: &mut [u8]) -> Result<(), UWireError> {
+        let bytes = self.encode_xcdr_v2_owned()?;
+        if dst.len() < bytes.len() {
+            return Err(UWireError::buffer_too_small(bytes.len(), dst.len()));
+        }
+        dst[..bytes.len()].copy_from_slice(&bytes);
+        Ok(())
+    }
 
-    /// Decodes `Self` from the frozen little-endian XCDRv2 fixture bytes.
-    fn decode_xcdr_v2(src: &[u8]) -> Result<Self, UWireError>;
+    /// Returns this value's encoded XCDRv2 length.
+    fn encoded_xcdr_v2_len(&self) -> Result<usize, UWireError> {
+        self.encode_xcdr_v2_owned().map(|bytes| bytes.len())
+    }
+
+    /// Decodes a top-level XCDRv2 value including the PLAIN_CDR2 encapsulation.
+    fn decode_xcdr_v2(src: &[u8]) -> Result<Self, UWireError> {
+        let mut decoder = XcdrV2Decoder::new(src);
+        decoder.read_encapsulation()?;
+        let value = Self::decode_xcdr_v2_fields(&mut decoder)?;
+        decoder.finish()?;
+        Ok(value)
+    }
 }
 
-/// Owned encoded XCDRv2 payload bytes for a supported fixture type.
+impl<T> XcdrV2Type for T where T: XcdrV2Struct + Sized {}
+
+/// Struct-body contract generated by `#[derive(XcdrV2Type)]`.
+pub trait XcdrV2Struct: Sized {
+    /// Stable type name used in diagnostics and documentation.
+    const TYPE_NAME: &'static str;
+
+    /// Encodes the CDR body fields without a top-level encapsulation header.
+    fn encode_xcdr_v2_fields(&self, encoder: &mut XcdrV2Encoder) -> Result<(), UWireError>;
+
+    /// Decodes the CDR body fields without a top-level encapsulation header.
+    fn decode_xcdr_v2_fields(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError>;
+}
+
+/// Field-level CDR serialization contract used by derived structs.
+pub trait XcdrV2Field: Sized {
+    /// Encodes this field into the current CDR stream.
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder) -> Result<(), UWireError>;
+
+    /// Decodes this field from the current CDR stream.
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError>;
+}
+
+/// Little-endian XCDRv2 PLAIN_CDR2 encoder.
+#[derive(Clone, Debug, Default)]
+pub struct XcdrV2Encoder {
+    bytes: Vec<u8>,
+}
+
+impl XcdrV2Encoder {
+    /// Creates an empty encoder.
+    #[must_use]
+    pub fn new() -> Self {
+        Self { bytes: Vec::new() }
+    }
+
+    /// Writes the PLAIN_CDR2 little-endian encapsulation.
+    pub fn write_encapsulation(&mut self) {
+        self.bytes
+            .extend_from_slice(&XCDR2_LE_PLAIN_CDR2_ENCAPSULATION);
+    }
+
+    /// Aligns the current stream position for the next CDR field.
+    pub fn align(&mut self, alignment: usize) -> Result<(), UWireError> {
+        if !alignment.is_power_of_two() {
+            return Err(UWireError::serialization_error(format!(
+                "invalid XCDRv2 alignment {alignment}"
+            )));
+        }
+        let padding = padding_for(self.bytes.len(), alignment);
+        self.bytes.resize(self.bytes.len() + padding, 0);
+        Ok(())
+    }
+
+    /// Writes already-little-endian scalar bytes after applying alignment.
+    pub fn write_aligned_bytes(
+        &mut self,
+        alignment: usize,
+        bytes: &[u8],
+    ) -> Result<(), UWireError> {
+        self.align(alignment)?;
+        self.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    /// Writes raw unaligned bytes.
+    pub fn write_bytes(&mut self, bytes: &[u8]) {
+        self.bytes.extend_from_slice(bytes);
+    }
+
+    /// Consumes the encoder and returns bytes.
+    #[must_use]
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+
+    /// Returns the current position.
+    #[must_use]
+    pub fn position(&self) -> usize {
+        self.bytes.len()
+    }
+}
+
+/// Little-endian XCDRv2 PLAIN_CDR2 decoder.
+#[derive(Clone, Debug)]
+pub struct XcdrV2Decoder<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> XcdrV2Decoder<'a> {
+    /// Creates a decoder over encoded XCDRv2 bytes.
+    #[must_use]
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
+    }
+
+    /// Reads and validates the PLAIN_CDR2 little-endian encapsulation.
+    pub fn read_encapsulation(&mut self) -> Result<(), UWireError> {
+        let header = self.read_exact(4)?;
+        if header != XCDR2_LE_PLAIN_CDR2_ENCAPSULATION {
+            return Err(UWireError::invalid_payload(
+                "unsupported XCDRv2 encapsulation; expected little-endian PLAIN_CDR2",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Aligns the read cursor for the next CDR field.
+    pub fn align(&mut self, alignment: usize) -> Result<(), UWireError> {
+        if !alignment.is_power_of_two() {
+            return Err(UWireError::serialization_error(format!(
+                "invalid XCDRv2 alignment {alignment}"
+            )));
+        }
+        let padding = padding_for(self.offset, alignment);
+        self.offset = self
+            .offset
+            .checked_add(padding)
+            .ok_or_else(|| UWireError::invalid_payload("XCDRv2 offset overflow"))?;
+        if self.offset > self.bytes.len() {
+            return Err(UWireError::invalid_payload(
+                "XCDRv2 padding exceeds payload length",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Reads an aligned fixed-width byte range.
+    pub fn read_aligned_bytes(
+        &mut self,
+        alignment: usize,
+        len: usize,
+    ) -> Result<&'a [u8], UWireError> {
+        self.align(alignment)?;
+        self.read_exact(len)
+    }
+
+    /// Reads a raw unaligned byte range.
+    pub fn read_exact(&mut self, len: usize) -> Result<&'a [u8], UWireError> {
+        let end = self
+            .offset
+            .checked_add(len)
+            .ok_or_else(|| UWireError::invalid_payload("XCDRv2 offset overflow"))?;
+        if end > self.bytes.len() {
+            return Err(UWireError::invalid_payload(format!(
+                "XCDRv2 payload ended at byte {}, needed byte {end}",
+                self.bytes.len()
+            )));
+        }
+        let out = &self.bytes[self.offset..end];
+        self.offset = end;
+        Ok(out)
+    }
+
+    /// Finishes a top-level decode and rejects trailing bytes.
+    pub fn finish(&self) -> Result<(), UWireError> {
+        if self.offset != self.bytes.len() {
+            return Err(UWireError::invalid_payload(format!(
+                "XCDRv2 payload has {} trailing bytes",
+                self.bytes.len() - self.offset
+            )));
+        }
+        Ok(())
+    }
+
+    /// Returns current read position.
+    #[must_use]
+    pub fn position(&self) -> usize {
+        self.offset
+    }
+}
+
+/// Owned encoded XCDRv2 payload bytes for a supported typed payload.
 #[derive(Clone, Debug)]
 pub struct XcdrV2Payload<T> {
     bytes: Vec<u8>,
@@ -100,18 +304,12 @@ pub struct XcdrV2Payload<T> {
 
 impl<T> XcdrV2Payload<T>
 where
-    T: XcdrV2Mappable,
+    T: XcdrV2Type,
 {
-    /// Encodes a supported fixture value into owned XCDRv2 bytes.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the fixture encoder rejects the value.
+    /// Encodes a typed value into owned XCDRv2 bytes.
     pub fn encode(value: &T) -> Result<Self, UWireError> {
-        let mut bytes = vec![0_u8; T::ENCODED_LEN];
-        value.encode_xcdr_v2(&mut bytes)?;
         Ok(Self {
-            bytes,
+            bytes: value.encode_xcdr_v2_owned()?,
             _payload: PhantomData,
         })
     }
@@ -123,10 +321,6 @@ where
     }
 
     /// Decodes the owned XCDRv2 bytes into the supported fixture type.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the bytes are not the frozen fixture encoding.
     pub fn decode(&self) -> Result<T, UWireError> {
         T::decode_xcdr_v2(&self.bytes)
     }
@@ -138,8 +332,9 @@ where
     }
 }
 
-/// Crate-owned integer-only fixture frozen by the `USR-05X` preflight.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+/// Crate-owned example fixture retained for downstream compatibility.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, XcdrV2Type)]
+#[xcdr_v2(type_name = "VehicleSignalV1")]
 pub struct VehicleSignalV1 {
     /// Vehicle identifier.
     pub vehicle_id: u32,
@@ -152,56 +347,16 @@ pub struct VehicleSignalV1 {
 }
 
 impl VehicleSignalV1 {
-    /// Serialized size of the constrained first-wave XCDRv2 fixture.
+    /// Serialized size of the frozen compatibility fixture.
     pub const ENCODED_LEN: usize = 16;
-}
-
-impl XcdrV2Mappable for VehicleSignalV1 {
-    const TYPE_NAME: &'static str = "VehicleSignalV1";
-    const ENCODED_LEN: usize = Self::ENCODED_LEN;
-
-    fn encode_xcdr_v2(&self, dst: &mut [u8]) -> Result<(), UWireError> {
-        if dst.len() < Self::ENCODED_LEN {
-            return Err(UWireError::buffer_too_small(Self::ENCODED_LEN, dst.len()));
-        }
-
-        dst[..Self::ENCODED_LEN].fill(0);
-        dst[0..4].copy_from_slice(&XCDR2_LE_FIXTURE_PREFIX);
-        dst[4..8].copy_from_slice(&self.vehicle_id.to_le_bytes());
-        dst[8..10].copy_from_slice(&self.signal_id.to_le_bytes());
-        dst[10..12].copy_from_slice(&self.sequence.to_le_bytes());
-        dst[12..16].copy_from_slice(&self.value.to_le_bytes());
-        Ok(())
-    }
-
-    fn decode_xcdr_v2(src: &[u8]) -> Result<Self, UWireError> {
-        if src.len() != Self::ENCODED_LEN {
-            return Err(UWireError::invalid_payload_length(
-                Self::ENCODED_LEN,
-                src.len(),
-            ));
-        }
-        if src[0..4] != XCDR2_LE_FIXTURE_PREFIX {
-            return Err(UWireError::invalid_payload(
-                "unsupported XCDRv2 fixture prefix or endian/version",
-            ));
-        }
-
-        Ok(Self {
-            vehicle_id: read_u32(src, 4),
-            signal_id: read_u16(src, 8),
-            sequence: read_u16(src, 10),
-            value: read_i32(src, 12),
-        })
-    }
 }
 
 impl<T> EncodePayload<T> for XcdrV2Wire
 where
-    T: XcdrV2Mappable,
+    T: XcdrV2Type,
 {
-    fn payload_layout(_value: &T) -> Result<PayloadLayout, UWireError> {
-        PayloadLayout::new(T::ENCODED_LEN, 1)
+    fn payload_layout(value: &T) -> Result<PayloadLayout, UWireError> {
+        PayloadLayout::new(value.encoded_xcdr_v2_len()?, 1)
     }
 
     fn encode_payload(value: &T, dst: &mut [u8]) -> Result<(), UWireError> {
@@ -211,7 +366,7 @@ where
 
 impl<'a, T> DecodePayload<'a, T> for XcdrV2Wire
 where
-    T: XcdrV2Mappable,
+    T: XcdrV2Type,
 {
     fn decode_payload(src: &'a [u8]) -> Result<T, UWireError> {
         T::decode_xcdr_v2(src)
@@ -220,18 +375,12 @@ where
 
 impl<T> ReadDecodePayload<T> for XcdrV2Wire
 where
-    T: XcdrV2Mappable,
+    T: XcdrV2Type,
 {
     fn decode_payload_from_reader<R: Read>(
         mut reader: R,
         payload_len: usize,
     ) -> Result<T, UWireError> {
-        if payload_len != T::ENCODED_LEN {
-            return Err(UWireError::invalid_payload_length(
-                T::ENCODED_LEN,
-                payload_len,
-            ));
-        }
         let mut bytes = vec![0_u8; payload_len];
         reader
             .read_exact(&mut bytes)
@@ -240,22 +389,207 @@ where
     }
 }
 
-fn read_u16(src: &[u8], offset: usize) -> u16 {
-    let mut bytes = [0_u8; 2];
-    bytes.copy_from_slice(&src[offset..offset + 2]);
-    u16::from_le_bytes(bytes)
+macro_rules! xcdr_scalar {
+    ($ty:ty, $alignment:expr, $to_bytes:ident, $from_bytes:ident) => {
+        impl XcdrV2Field for $ty {
+            fn encode_field(&self, encoder: &mut XcdrV2Encoder) -> Result<(), UWireError> {
+                encoder.write_aligned_bytes($alignment, &self.$to_bytes())
+            }
+
+            fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+                let bytes =
+                    decoder.read_aligned_bytes($alignment, ::core::mem::size_of::<$ty>())?;
+                Ok(<$ty>::$from_bytes(
+                    bytes.try_into().expect("fixed-width slice"),
+                ))
+            }
+        }
+    };
 }
 
-fn read_u32(src: &[u8], offset: usize) -> u32 {
-    let mut bytes = [0_u8; 4];
-    bytes.copy_from_slice(&src[offset..offset + 4]);
-    u32::from_le_bytes(bytes)
+xcdr_scalar!(u16, 2, to_le_bytes, from_le_bytes);
+xcdr_scalar!(i16, 2, to_le_bytes, from_le_bytes);
+xcdr_scalar!(u32, 4, to_le_bytes, from_le_bytes);
+xcdr_scalar!(i32, 4, to_le_bytes, from_le_bytes);
+xcdr_scalar!(u64, 8, to_le_bytes, from_le_bytes);
+xcdr_scalar!(i64, 8, to_le_bytes, from_le_bytes);
+xcdr_scalar!(f32, 4, to_le_bytes, from_le_bytes);
+xcdr_scalar!(f64, 8, to_le_bytes, from_le_bytes);
+
+impl XcdrV2Field for u8 {
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder) -> Result<(), UWireError> {
+        encoder.write_bytes(&[*self]);
+        Ok(())
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        Ok(decoder.read_exact(1)?[0])
+    }
 }
 
-fn read_i32(src: &[u8], offset: usize) -> i32 {
-    let mut bytes = [0_u8; 4];
-    bytes.copy_from_slice(&src[offset..offset + 4]);
-    i32::from_le_bytes(bytes)
+impl XcdrV2Field for i8 {
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder) -> Result<(), UWireError> {
+        (*self as u8).encode_field(encoder)
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        Ok(u8::decode_field(decoder)? as i8)
+    }
+}
+
+impl XcdrV2Field for bool {
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder) -> Result<(), UWireError> {
+        let value: u8 = if *self { 1 } else { 0 };
+        value.encode_field(encoder)
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        match u8::decode_field(decoder)? {
+            0 => Ok(false),
+            1 => Ok(true),
+            other => Err(UWireError::invalid_payload(format!(
+                "invalid XCDRv2 bool discriminant {other}"
+            ))),
+        }
+    }
+}
+
+impl XcdrV2Field for char {
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder) -> Result<(), UWireError> {
+        (*self as u32).encode_field(encoder)
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        let value = u32::decode_field(decoder)?;
+        char::from_u32(value).ok_or_else(|| {
+            UWireError::invalid_payload(format!("invalid XCDRv2 char scalar value {value}"))
+        })
+    }
+}
+
+impl<T> XcdrV2Field for T
+where
+    T: XcdrV2Struct,
+{
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder) -> Result<(), UWireError> {
+        self.encode_xcdr_v2_fields(encoder)
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        Self::decode_xcdr_v2_fields(decoder)
+    }
+}
+
+impl<T, const N: usize> XcdrV2Field for [T; N]
+where
+    T: XcdrV2Field,
+{
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder) -> Result<(), UWireError> {
+        for value in self {
+            value.encode_field(encoder)?;
+        }
+        Ok(())
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        let mut values = Vec::with_capacity(N);
+        for _ in 0..N {
+            values.push(T::decode_field(decoder)?);
+        }
+        match values.try_into() {
+            Ok(values) => Ok(values),
+            Err(_) => Err(UWireError::serialization_error(
+                "internal XCDRv2 array decode length mismatch",
+            )),
+        }
+    }
+}
+
+impl<T> XcdrV2Field for Vec<T>
+where
+    T: XcdrV2Field,
+{
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder) -> Result<(), UWireError> {
+        let len = u32::try_from(self.len())
+            .map_err(|_| UWireError::invalid_payload("XCDRv2 sequence length exceeds u32::MAX"))?;
+        len.encode_field(encoder)?;
+        for value in self {
+            value.encode_field(encoder)?;
+        }
+        Ok(())
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        let len = u32::decode_field(decoder)? as usize;
+        let mut values = Vec::with_capacity(len);
+        for _ in 0..len {
+            values.push(T::decode_field(decoder)?);
+        }
+        Ok(values)
+    }
+}
+
+impl XcdrV2Field for String {
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder) -> Result<(), UWireError> {
+        if self.as_bytes().contains(&0) {
+            return Err(UWireError::invalid_payload(
+                "XCDRv2 string contains an interior NUL byte",
+            ));
+        }
+        let len = u32::try_from(self.len() + 1)
+            .map_err(|_| UWireError::invalid_payload("XCDRv2 string length exceeds u32::MAX"))?;
+        len.encode_field(encoder)?;
+        encoder.write_bytes(self.as_bytes());
+        encoder.write_bytes(&[0]);
+        Ok(())
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        let len = u32::decode_field(decoder)? as usize;
+        if len == 0 {
+            return Err(UWireError::invalid_payload("XCDRv2 string length is zero"));
+        }
+        let bytes = decoder.read_exact(len)?;
+        if bytes[len - 1] != 0 {
+            return Err(UWireError::invalid_payload(
+                "XCDRv2 string is missing terminating NUL",
+            ));
+        }
+        String::from_utf8(bytes[..len - 1].to_vec())
+            .map_err(|error| UWireError::invalid_payload(error.to_string()))
+    }
+}
+
+impl<T> XcdrV2Field for Option<T>
+where
+    T: XcdrV2Field,
+{
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder) -> Result<(), UWireError> {
+        match self {
+            Some(value) => {
+                true.encode_field(encoder)?;
+                value.encode_field(encoder)
+            }
+            None => false.encode_field(encoder),
+        }
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        if bool::decode_field(decoder)? {
+            Ok(Some(T::decode_field(decoder)?))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+fn padding_for(position: usize, alignment: usize) -> usize {
+    let remainder = position % alignment;
+    if remainder == 0 {
+        0
+    } else {
+        alignment - remainder
+    }
 }
 
 #[cfg(test)]
@@ -266,12 +600,52 @@ mod tests {
     use up_rust::wire_implementer_api::{NativePrefixProtobufMetadataCodec, UWireMetadataCodec};
     use up_rust::PayloadCodec;
 
+    #[derive(Clone, Debug, Eq, PartialEq, XcdrV2Type)]
+    #[xcdr_v2(type_name = "ExampleNested")]
+    struct ExampleNested {
+        flag: bool,
+        amount: i32,
+    }
+
+    #[derive(Clone, Debug, PartialEq, XcdrV2Type)]
+    #[xcdr_v2(type_name = "ExamplePayload")]
+    struct ExamplePayload {
+        id: u32,
+        nested: ExampleNested,
+        values: [u16; 3],
+        name: String,
+        samples: Vec<i32>,
+        maybe: Option<u64>,
+        ratio: f32,
+    }
+
     #[test]
     fn vehicle_signal_golden_bytes_are_frozen() {
         let encoded = XcdrV2Wire::encode_payload_owned(&VEHICLE_SIGNAL_V1_GOLDEN_VALUE)
             .expect("encode golden fixture");
 
         assert_eq!(encoded.as_ref(), VEHICLE_SIGNAL_V1_GOLDEN_BYTES);
+    }
+
+    #[test]
+    fn derived_struct_round_trip_with_variable_fields() {
+        let value = ExamplePayload {
+            id: 7,
+            nested: ExampleNested {
+                flag: true,
+                amount: -9,
+            },
+            values: [1, 2, 3],
+            name: "drive-by-wire".to_string(),
+            samples: vec![-1, 0, 44],
+            maybe: Some(99),
+            ratio: 1.25,
+        };
+
+        let encoded = XcdrV2Payload::<ExamplePayload>::encode(&value).expect("encode");
+        let decoded = encoded.decode().expect("decode");
+
+        assert_eq!(decoded, value);
     }
 
     #[test]
@@ -309,7 +683,7 @@ mod tests {
             XcdrV2Wire::decode_payload(&wrong_prefix);
         assert!(matches!(
             wrong_prefix_result,
-            Err(UWireError::InvalidPayload(message)) if message.contains("prefix")
+            Err(UWireError::InvalidPayload(message)) if message.contains("encapsulation")
         ));
     }
 

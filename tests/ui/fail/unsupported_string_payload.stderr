@@ -1,19 +1,20 @@
-error[E0277]: the trait bound `UnsupportedStringPayload: XcdrV2Mappable` is not satisfied
+error[E0277]: the trait bound `UnsupportedStringPayload: XcdrV2Struct` is not satisfied
   --> tests/ui/fail/unsupported_string_payload.rs:21:27
    |
 21 |     needs_xcdrv2_encode::<XcdrV2Wire>();
    |                           ^^^^^^^^^^ unsatisfied trait bound
    |
-help: the trait `XcdrV2Mappable` is not implemented for `UnsupportedStringPayload`
+help: the trait `XcdrV2Struct` is not implemented for `UnsupportedStringPayload`
   --> tests/ui/fail/unsupported_string_payload.rs:10:1
    |
 10 | struct UnsupportedStringPayload {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-help: the trait `XcdrV2Mappable` is implemented for `VehicleSignalV1`
+help: the trait `XcdrV2Struct` is implemented for `VehicleSignalV1`
   --> src/lib.rs
    |
-   | impl XcdrV2Mappable for VehicleSignalV1 {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   | #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, XcdrV2Type)]
+   |                                                      ^^^^^^^^^^
+   = note: required for `UnsupportedStringPayload` to implement `XcdrV2Type`
    = note: required for `XcdrV2Wire` to implement `EncodePayload<UnsupportedStringPayload>`
    = note: required for `XcdrV2Wire` to implement `UWireEncode<UnsupportedStringPayload>`
 note: required by a bound in `needs_xcdrv2_encode`
@@ -24,3 +25,4 @@ note: required by a bound in `needs_xcdrv2_encode`
 15 | where
 16 |     W: UWireEncode<UnsupportedStringPayload>,
    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `needs_xcdrv2_encode`
+   = note: this error originates in the derive macro `XcdrV2Type` (in Nightly builds, run with -Z macro-backtrace for more info)

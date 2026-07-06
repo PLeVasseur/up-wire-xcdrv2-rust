@@ -1,0 +1,5 @@
+error: XcdrV2Type derive supports named-field structs and unit structs only
+  --> tests/ui/fail/unsupported_tuple_struct_derive.rs:10:24
+   |
+10 | struct UnsupportedTuple(u32);
+   |                        ^^^^^
