@@ -5,10 +5,12 @@
  ********************************************************************************/
 
 use up_rust::transport_implementer_api::PreparedTxLoanSpec;
-use up_rust::wire_implementer_api::{NativePrefixProtobufMetadataCodec, UWire, UWireMetadataCodec};
+use up_rust::wire_implementer_api::{
+    NativePrefixFrameMetadataCodec, NativePrefixProtobufMetadataCodec, UWire, UWireMetadataCodec,
+};
 use up_rust::{
-    EncodePayload, PayloadCodec, UFrameMetadata, UMessageBuilder, UTxBuffer, UTxLoanSpec, UUri,
-    UVecTxBuffer, ValidatedTxLoanSpec,
+    EncodePayload, PayloadCodec, UFrameMetadata, UTxBuffer, UTxLoanSpec, UUri, UVecTxBuffer,
+    ValidatedTxLoanSpec,
 };
 use up_wire_xcdrv2::{
     VehicleSignalV1, XcdrV2Wire, VEHICLE_SIGNAL_V1_GOLDEN_BYTES, VEHICLE_SIGNAL_V1_GOLDEN_VALUE,
@@ -22,15 +24,15 @@ fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
     let spec = UTxLoanSpec::payload(metadata.clone(), layout.len(), layout.align())
         .expect("create TX loan spec");
     let prepared =
-        PreparedTxLoanSpec::from_validated::<XcdrV2Wire, NativePrefixProtobufMetadataCodec>(
+        PreparedTxLoanSpec::from_validated::<XcdrV2Wire, NativePrefixFrameMetadataCodec>(
             ValidatedTxLoanSpec::try_from(spec).expect("validate TX loan spec"),
-            &NativePrefixProtobufMetadataCodec,
+            &NativePrefixFrameMetadataCodec,
         )
         .expect("prepare selected-wire TX");
 
     assert_eq!(prepared.payload_len(), VEHICLE_SIGNAL_V1_GOLDEN_BYTES.len());
     assert_eq!(prepared.payload_alignment_proof().as_usize(), 1);
-    let decoded_metadata = NativePrefixProtobufMetadataCodec
+    let decoded_metadata = NativePrefixFrameMetadataCodec
         .decode_frame_metadata(XcdrV2Wire::metadata_context(), prepared.encoded_metadata())
         .expect("decode prepared metadata");
     assert_eq!(decoded_metadata, metadata);
@@ -45,6 +47,19 @@ fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
         .expect("write serialized XCDRv2 bytes into loan");
 
     assert_eq!(tx.payload(), VEHICLE_SIGNAL_V1_GOLDEN_BYTES);
+}
+
+#[test]
+fn legacy_protobuf_metadata_codec_round_trips_xcdrv2_metadata() {
+    let metadata = metadata();
+    let encoded = NativePrefixProtobufMetadataCodec
+        .encode_frame_metadata(XcdrV2Wire::metadata_context(), &metadata)
+        .expect("encode legacy metadata");
+    let decoded = NativePrefixProtobufMetadataCodec
+        .decode_frame_metadata(XcdrV2Wire::metadata_context(), &encoded)
+        .expect("decode legacy metadata");
+
+    assert_eq!(decoded, metadata);
 }
 
 #[test]
@@ -63,10 +78,8 @@ fn public_trait_bounds_accept_supported_fixture() {
 
 fn metadata() -> UFrameMetadata {
     let topic = UUri::try_from_parts("vehicle", 0x4210, 0x01, 0x9000).expect("topic URI");
-    let message = UMessageBuilder::publish(topic).build().expect("message");
-    UFrameMetadata::new(
-        message.attributes().clone(),
-        Some(XcdrV2Wire::payload_encoding()),
-    )
-    .expect("metadata")
+    UFrameMetadata::publish(topic)
+        .with_payload_encoding(XcdrV2Wire::payload_encoding())
+        .build()
+        .expect("metadata")
 }

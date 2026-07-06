@@ -597,7 +597,7 @@ mod tests {
     use std::io::Cursor;
 
     use super::*;
-    use up_rust::wire_implementer_api::{NativePrefixProtobufMetadataCodec, UWireMetadataCodec};
+    use up_rust::wire_implementer_api::{NativePrefixFrameMetadataCodec, UWireMetadataCodec};
     use up_rust::PayloadCodec;
 
     #[derive(Clone, Debug, Eq, PartialEq, XcdrV2Type)]
@@ -693,10 +693,10 @@ mod tests {
         assert_eq!(XcdrV2Wire::PAYLOAD_FAMILY_ID, XCDR_V2_PAYLOAD_FAMILY_ID);
 
         let metadata = crate_metadata();
-        let encoded = NativePrefixProtobufMetadataCodec
+        let encoded = NativePrefixFrameMetadataCodec
             .encode_frame_metadata(XcdrV2Wire::metadata_context(), &metadata)
             .expect("encode metadata");
-        let decoded = NativePrefixProtobufMetadataCodec
+        let decoded = NativePrefixFrameMetadataCodec
             .decode_frame_metadata(XcdrV2Wire::metadata_context(), &encoded)
             .expect("decode metadata");
 
@@ -710,13 +710,9 @@ mod tests {
     fn crate_metadata() -> up_rust::UFrameMetadata {
         let topic =
             up_rust::UUri::try_from_parts("vehicle", 0x4210, 0x01, 0x9000).expect("topic URI");
-        let message = up_rust::UMessageBuilder::publish(topic)
+        up_rust::UFrameMetadata::publish(topic)
+            .with_payload_encoding(XcdrV2Wire::payload_encoding())
             .build()
-            .expect("message");
-        up_rust::UFrameMetadata::new(
-            message.attributes().clone(),
-            Some(XcdrV2Wire::payload_encoding()),
-        )
-        .expect("metadata")
+            .expect("metadata")
     }
 }
