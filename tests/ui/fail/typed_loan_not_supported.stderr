@@ -5,7 +5,7 @@ error[E0277]: the trait bound `XcdrV2Wire: LoanPayload<VehicleSignalV1>` is not 
     |                        ^^^^^^^^^^ the trait `LoanPayload<VehicleSignalV1>` is not implemented for `XcdrV2Wire`
     |
 help: the trait `LoanPayload<T>` is implemented for `StableContainerPayload<T>`
-   --> /home/pete.levasseur/.cargo/git/checkouts/up-rust-93e184482c2b39f2/eef9c44/src/payload/stable.rs:993:1
+   --> /home/pete.levasseur/.cargo/git/checkouts/up-rust-93e184482c2b39f2/c4ba259/src/payload/stable.rs:993:1
     |
 993 | / unsafe impl<T> LoanPayload<T> for StableContainerPayload<T>
 994 | | where
