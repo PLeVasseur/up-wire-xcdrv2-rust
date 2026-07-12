@@ -1,21 +1,21 @@
 error[E0277]: the trait bound `XcdrV2Wire: LoanPayload<VehicleSignalV1>` is not satisfied
-   --> tests/ui/fail/typed_loan_not_supported.rs:19:24
-    |
- 19 |     needs_typed_loan::<XcdrV2Wire>();
-    |                        ^^^^^^^^^^ the trait `LoanPayload<VehicleSignalV1>` is not implemented for `XcdrV2Wire`
-    |
+    --> tests/ui/fail/typed_loan_not_supported.rs:19:24
+     |
+  19 |     needs_typed_loan::<XcdrV2Wire>();
+     |                        ^^^^^^^^^^ the trait `LoanPayload<VehicleSignalV1>` is not implemented for `XcdrV2Wire`
+     |
 help: the trait `LoanPayload<T>` is implemented for `StableContainerPayload<T>`
-   --> /home/pete.levasseur/.cargo/git/checkouts/up-rust-93e184482c2b39f2/c4ba259/src/payload/stable.rs:993:1
-    |
-993 | / unsafe impl<T> LoanPayload<T> for StableContainerPayload<T>
-994 | | where
-995 | |     T: ByteBackedStablePayload + Default,
-    | |_________________________________________^
+    --> /home/pete.levasseur/.cargo/git/checkouts/up-rust-93e184482c2b39f2/314bc11/src/payload/stable.rs:1046:1
+     |
+1046 | / unsafe impl<T> LoanPayload<T> for StableContainerPayload<T>
+1047 | | where
+1048 | |     T: ByteBackedStablePayload + Default,
+     | |_________________________________________^
 note: required by a bound in `needs_typed_loan`
-   --> tests/ui/fail/typed_loan_not_supported.rs:14:50
-    |
- 11 | fn needs_typed_loan<W>()
-    |    ---------------- required by a bound in this function
+    --> tests/ui/fail/typed_loan_not_supported.rs:14:50
+     |
+  11 | fn needs_typed_loan<W>()
+     |    ---------------- required by a bound in this function
 ...
- 14 |     <W as UWirePayload<VehicleSignalV1>>::Codec: LoanPayload<VehicleSignalV1>,
-    |                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `needs_typed_loan`
+  14 |     <W as UWirePayload<VehicleSignalV1>>::Codec: LoanPayload<VehicleSignalV1>,
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `needs_typed_loan`
