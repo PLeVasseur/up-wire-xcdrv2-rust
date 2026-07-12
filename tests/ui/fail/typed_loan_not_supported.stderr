@@ -5,11 +5,11 @@ error[E0277]: the trait bound `XcdrV2Wire: LoanPayload<VehicleSignalV1>` is not 
      |                        ^^^^^^^^^^ the trait `LoanPayload<VehicleSignalV1>` is not implemented for `XcdrV2Wire`
      |
 help: the trait `LoanPayload<T>` is implemented for `StableContainerPayload<T>`
-    --> /home/pete.levasseur/.cargo/git/checkouts/up-rust-93e184482c2b39f2/314bc11/src/payload/stable.rs:1046:1
+    --> /home/pete.levasseur/.cargo/git/checkouts/up-rust-93e184482c2b39f2/31ee659/src/payload/stable.rs:1069:1
      |
-1046 | / unsafe impl<T> LoanPayload<T> for StableContainerPayload<T>
-1047 | | where
-1048 | |     T: ByteBackedStablePayload + Default,
+1069 | / unsafe impl<T> LoanPayload<T> for StableContainerPayload<T>
+1070 | | where
+1071 | |     T: ByteBackedStablePayload + Default,
      | |_________________________________________^
 note: required by a bound in `needs_typed_loan`
     --> tests/ui/fail/typed_loan_not_supported.rs:14:50
