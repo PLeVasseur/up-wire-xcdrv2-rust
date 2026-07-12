@@ -8,9 +8,9 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
-up-rust = { git = "ssh://git@github.com/PLeVasseur/up-rust.git", rev = "31ee659aae9588fabfd99678730a8229a0cdc18c", default-features = false, features = ["selected-wire-user-api", "wire-implementer-api", "zero-copy-uninit"] }
+up-rust = { git = "https://github.com/PLeVasseur/up-rust.git", rev = "31ee659aae9588fabfd99678730a8229a0cdc18c", default-features = false, features = ["selected-wire-user-api", "wire-implementer-api", "zero-copy-uninit"] }
 up-wire-xcdrv2-macros = { path = "macros" }
 
 [dev-dependencies]
 trybuild = "1.0.114"
-up-rust = { git = "ssh://git@github.com/PLeVasseur/up-rust.git", rev = "31ee659aae9588fabfd99678730a8229a0cdc18c", default-features = false, features = ["selected-wire-user-api", "transport-implementer-api", "wire-implementer-api", "selected-wire-legacy-protobuf-metadata", "zero-copy-uninit"] }
+up-rust = { git = "https://github.com/PLeVasseur/up-rust.git", rev = "31ee659aae9588fabfd99678730a8229a0cdc18c", default-features = false, features = ["selected-wire-user-api", "transport-implementer-api", "wire-implementer-api", "selected-wire-legacy-protobuf-metadata", "zero-copy-uninit"] }
