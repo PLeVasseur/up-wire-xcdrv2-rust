@@ -10,7 +10,6 @@ fn xcdrv2_wire_trybuild() {
     tests.pass("tests/ui/pass/supported_fixture.rs");
     tests.pass("tests/ui/pass/derived_user_struct.rs");
     tests.compile_fail("tests/ui/fail/unsupported_string_payload.rs");
-    tests.compile_fail("tests/ui/fail/typed_loan_not_supported.rs");
     tests.compile_fail("tests/ui/fail/unsupported_enum_derive.rs");
     tests.compile_fail("tests/ui/fail/unsupported_tuple_struct_derive.rs");
 }

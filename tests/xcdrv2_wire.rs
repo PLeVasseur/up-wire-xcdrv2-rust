@@ -16,6 +16,8 @@ use up_wire_xcdrv2::{
     VehicleSignalV1, XcdrV2Wire, VEHICLE_SIGNAL_V1_GOLDEN_BYTES, VEHICLE_SIGNAL_V1_GOLDEN_VALUE,
 };
 
+static_assertions::assert_not_impl_any!(XcdrV2Wire: up_rust::LoanPayload<VehicleSignalV1>);
+
 #[test]
 fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
     let metadata = metadata();
