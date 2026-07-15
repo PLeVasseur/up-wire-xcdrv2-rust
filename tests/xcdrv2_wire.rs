@@ -5,12 +5,9 @@
  ********************************************************************************/
 
 use up_rust::transport_implementer_api::PreparedTxLoanSpec;
-use up_rust::wire_implementer_api::{
-    NativePrefixFrameMetadataCodec, NativePrefixProtobufMetadataCodec, UWire, UWireMetadataCodec,
-};
+use up_rust::wire_implementer_api::{NativePrefixFrameMetadataCodec, UWire, UWireMetadataCodec};
 use up_rust::{
     EncodePayload, PayloadCodec, UFrameMetadata, UTxBuffer, UTxLoanSpec, UUri, UVecTxBuffer,
-    ValidatedTxLoanSpec,
 };
 use up_wire_xcdrv2::{
     VehicleSignalV1, XcdrV2Wire, VEHICLE_SIGNAL_V1_GOLDEN_BYTES, VEHICLE_SIGNAL_V1_GOLDEN_VALUE,
@@ -27,7 +24,7 @@ fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
         .expect("create TX loan spec");
     let prepared =
         PreparedTxLoanSpec::from_validated::<XcdrV2Wire, NativePrefixFrameMetadataCodec>(
-            ValidatedTxLoanSpec::try_from(spec).expect("validate TX loan spec"),
+            spec,
             &NativePrefixFrameMetadataCodec,
         )
         .expect("prepare selected-wire TX");
@@ -49,19 +46,6 @@ fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
         .expect("write serialized XCDRv2 bytes into loan");
 
     assert_eq!(tx.payload(), VEHICLE_SIGNAL_V1_GOLDEN_BYTES);
-}
-
-#[test]
-fn legacy_protobuf_metadata_codec_round_trips_xcdrv2_metadata() {
-    let metadata = metadata();
-    let encoded = NativePrefixProtobufMetadataCodec
-        .encode_frame_metadata(XcdrV2Wire::metadata_context(), &metadata)
-        .expect("encode legacy metadata");
-    let decoded = NativePrefixProtobufMetadataCodec
-        .decode_frame_metadata(XcdrV2Wire::metadata_context(), &encoded)
-        .expect("decode legacy metadata");
-
-    assert_eq!(decoded, metadata);
 }
 
 #[test]
