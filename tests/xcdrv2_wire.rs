@@ -5,12 +5,14 @@
  ********************************************************************************/
 
 use up_rust::{
-    EncodePayload, PayloadCodec, PreparedTxLoanSpec, UFrameMetadata, UMessageBuilder, UTxBuffer,
-    UTxLoanSpec, UUri, UVecTxBuffer, UWireMetadata, ValidatedTxLoanSpec,
+    EncodePayload, NativePrefixFrameMetadataCodec, PayloadCodec, PreparedTxLoanSpec,
+    UFrameMetadata, UTxBuffer, UTxLoanSpec, UUri, UVecTxBuffer, UWire, UWireMetadataCodec,
 };
 use up_wire_xcdrv2::{
     VehicleSignalV1, XcdrV2Wire, VEHICLE_SIGNAL_V1_GOLDEN_BYTES, VEHICLE_SIGNAL_V1_GOLDEN_VALUE,
 };
+
+static_assertions::assert_not_impl_any!(XcdrV2Wire: up_rust::BorrowPayload<VehicleSignalV1>);
 
 #[test]
 fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
@@ -19,14 +21,17 @@ fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
         .expect("measure XCDRv2 payload");
     let spec = UTxLoanSpec::payload(metadata.clone(), layout.len(), layout.align())
         .expect("create TX loan spec");
-    let prepared = PreparedTxLoanSpec::from_validated::<XcdrV2Wire>(
-        ValidatedTxLoanSpec::try_from(spec).expect("validate TX loan spec"),
-    )
-    .expect("prepare selected-wire TX");
+    let codec = NativePrefixFrameMetadataCodec;
+    let prepared =
+        PreparedTxLoanSpec::from_validated::<XcdrV2Wire, NativePrefixFrameMetadataCodec>(
+            spec, &codec,
+        )
+        .expect("prepare selected-wire TX");
 
     assert_eq!(prepared.payload_len(), VEHICLE_SIGNAL_V1_GOLDEN_BYTES.len());
     assert_eq!(prepared.payload_alignment(), 1);
-    let decoded_metadata = XcdrV2Wire::decode_frame_metadata(prepared.encoded_metadata())
+    let decoded_metadata = codec
+        .decode_frame_metadata(XcdrV2Wire::metadata_context(), prepared.encoded_metadata())
         .expect("decode prepared metadata");
     assert_eq!(decoded_metadata, metadata);
 
@@ -46,8 +51,7 @@ fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
 fn public_trait_bounds_accept_supported_fixture() {
     fn assert_supported<W>()
     where
-        W: up_rust::UWireMetadata
-            + up_rust::UWireEncode<VehicleSignalV1>
+        W: up_rust::UWireEncode<VehicleSignalV1>
             + for<'a> up_rust::UWireDecode<'a, VehicleSignalV1>
             + up_rust::UWireReadDecode<VehicleSignalV1>,
     {
@@ -58,10 +62,8 @@ fn public_trait_bounds_accept_supported_fixture() {
 
 fn metadata() -> UFrameMetadata {
     let topic = UUri::try_from_parts("vehicle", 0x4210, 0x01, 0x9000).expect("topic URI");
-    let message = UMessageBuilder::publish(topic).build().expect("message");
-    UFrameMetadata::new(
-        message.attributes().clone(),
-        Some(XcdrV2Wire::payload_encoding()),
-    )
-    .expect("metadata")
+    UFrameMetadata::publish(topic)
+        .with_payload_encoding(XcdrV2Wire::payload_encoding())
+        .build()
+        .expect("metadata")
 }

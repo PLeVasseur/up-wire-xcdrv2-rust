@@ -7,15 +7,15 @@
 use std::{io::Read, marker::PhantomData};
 
 use up_rust::{
-    DecodePayload, EncodePayload, PayloadEncoding, PayloadFormat, PayloadLayout, ReadDecodePayload,
-    UWire, UWireError, WireIdentity, NATIVE_PREFIX_METADATA_LAYOUT_ID, XCDR_V2_PAYLOAD_FAMILY_ID,
-    XCDR_V2_WIRE_ID,
+    DecodePayload, EncodePayload, PayloadCodecIdentity, PayloadDecodeLimit, PayloadEncoding,
+    PayloadLayout, ReadDecodePayload, UWire, UWireError, UWirePayload, WireIdentity,
+    NATIVE_PREFIX_METADATA_LAYOUT_ID, XCDR_V2_PAYLOAD_FAMILY_ID, XCDR_V2_WIRE_ID,
 };
 
 const XCDR2_LE_FIXTURE_PREFIX: [u8; 4] = [0x06, 0x00, 0x00, 0x00];
 
 /// Payload encoding id used by the constrained first-wave XCDRv2 fixture.
-pub const XCDR_V2_ENCODING_ID: &str = "up.xcdr-v2";
+pub const XCDR_V2_ENCODING_ID: u32 = 9;
 
 /// Payload content type for the frozen `VehicleSignalV1` fixture.
 pub const VEHICLE_SIGNAL_V1_CONTENT_TYPE: &str =
@@ -45,15 +45,21 @@ impl UWire for XcdrV2Wire {
     const FORMAT_VERSION: u16 = up_rust::wire::FORMAT_VERSION;
 }
 
-impl PayloadFormat for XcdrV2Wire {
+impl PayloadCodecIdentity for XcdrV2Wire {
     fn name() -> &'static str {
         "xcdr-v2-vehicle-signal-v1"
     }
 
     fn encoding() -> PayloadEncoding {
-        PayloadEncoding::custom(XCDR_V2_ENCODING_ID, VEHICLE_SIGNAL_V1_CONTENT_TYPE)
-            .expect("valid XCDRv2 payload encoding")
+        PayloadEncoding::from_registry_entry(XCDR_V2_ENCODING_ID)
     }
+}
+
+impl<T> UWirePayload<T> for XcdrV2Wire
+where
+    T: XcdrV2Mappable,
+{
+    type Codec = Self;
 }
 
 /// Types with explicit support in this constrained XCDRv2 fixture adapter.
@@ -135,6 +141,10 @@ impl VehicleSignalV1 {
     pub const ENCODED_LEN: usize = 16;
 }
 
+/// Encoded-input policy for the fixed-size `VehicleSignalV1` reader path.
+pub const VEHICLE_SIGNAL_V1_DECODE_LIMIT: PayloadDecodeLimit =
+    PayloadDecodeLimit::new(VehicleSignalV1::ENCODED_LEN);
+
 impl XcdrV2Mappable for VehicleSignalV1 {
     const TYPE_NAME: &'static str = "VehicleSignalV1";
     const ENCODED_LEN: usize = Self::ENCODED_LEN;
@@ -204,7 +214,14 @@ where
     fn decode_payload_from_reader<R: Read>(
         mut reader: R,
         payload_len: usize,
+        limit: PayloadDecodeLimit,
     ) -> Result<T, UWireError> {
+        if payload_len > limit.max_payload_bytes() {
+            return Err(UWireError::invalid_payload(format!(
+                "advertised payload length {payload_len} exceeds configured input limit {}",
+                limit.max_payload_bytes()
+            )));
+        }
         if payload_len != T::ENCODED_LEN {
             return Err(UWireError::invalid_payload_length(
                 T::ENCODED_LEN,
@@ -215,6 +232,16 @@ where
         reader
             .read_exact(&mut bytes)
             .map_err(|error| UWireError::invalid_payload(error.to_string()))?;
+        let mut overrun = [0_u8; 1];
+        match reader.read(&mut overrun) {
+            Ok(0) => {}
+            Ok(_) => {
+                return Err(UWireError::invalid_payload(
+                    "payload reader yielded bytes beyond the advertised length",
+                ));
+            }
+            Err(error) => return Err(UWireError::invalid_payload(error.to_string())),
+        }
         T::decode_xcdr_v2(&bytes)
     }
 }
@@ -242,7 +269,7 @@ mod tests {
     use std::io::Cursor;
 
     use super::*;
-    use up_rust::{PayloadCodec, UWireMetadata};
+    use up_rust::{NativePrefixFrameMetadataCodec, PayloadCodec, UWireMetadataCodec};
 
     #[test]
     fn vehicle_signal_golden_bytes_are_frozen() {
@@ -266,6 +293,7 @@ mod tests {
         let decoded: VehicleSignalV1 = XcdrV2Wire::decode_payload_from_reader(
             Cursor::new(encoded.as_bytes()),
             encoded.as_bytes().len(),
+            VEHICLE_SIGNAL_V1_DECODE_LIMIT,
         )
         .expect("decode from reader");
         assert_eq!(decoded, VEHICLE_SIGNAL_V1_GOLDEN_VALUE);
@@ -292,13 +320,51 @@ mod tests {
     }
 
     #[test]
+    fn reader_policy_rejects_limit_eof_and_overrun() {
+        let below_contract: Result<VehicleSignalV1, UWireError> =
+            XcdrV2Wire::decode_payload_from_reader(
+                Cursor::new(VEHICLE_SIGNAL_V1_GOLDEN_BYTES),
+                VehicleSignalV1::ENCODED_LEN,
+                PayloadDecodeLimit::new(VehicleSignalV1::ENCODED_LEN - 1),
+            );
+        assert!(matches!(
+            below_contract,
+            Err(UWireError::InvalidPayload(message)) if message.contains("configured input limit")
+        ));
+
+        let early_eof: Result<VehicleSignalV1, UWireError> = XcdrV2Wire::decode_payload_from_reader(
+            Cursor::new(&VEHICLE_SIGNAL_V1_GOLDEN_BYTES[..15]),
+            VehicleSignalV1::ENCODED_LEN,
+            VEHICLE_SIGNAL_V1_DECODE_LIMIT,
+        );
+        assert!(matches!(early_eof, Err(UWireError::InvalidPayload(_))));
+
+        let mut overlong = VEHICLE_SIGNAL_V1_GOLDEN_BYTES.to_vec();
+        overlong.push(0);
+        let overrun: Result<VehicleSignalV1, UWireError> = XcdrV2Wire::decode_payload_from_reader(
+            Cursor::new(overlong),
+            VehicleSignalV1::ENCODED_LEN,
+            VEHICLE_SIGNAL_V1_DECODE_LIMIT,
+        );
+        assert!(matches!(
+            overrun,
+            Err(UWireError::InvalidPayload(message)) if message.contains("beyond")
+        ));
+    }
+
+    #[test]
     fn metadata_uses_public_up_rust_native_prefix_api() {
         assert_eq!(XcdrV2Wire::WIRE_ID, XCDR_V2_WIRE_ID);
         assert_eq!(XcdrV2Wire::PAYLOAD_FAMILY_ID, XCDR_V2_PAYLOAD_FAMILY_ID);
 
         let metadata = crate_metadata();
-        let encoded = XcdrV2Wire::encode_frame_metadata(&metadata).expect("encode metadata");
-        let decoded = XcdrV2Wire::decode_frame_metadata(&encoded).expect("decode metadata");
+        let codec = NativePrefixFrameMetadataCodec;
+        let encoded = codec
+            .encode_frame_metadata(XcdrV2Wire::metadata_context(), &metadata)
+            .expect("encode metadata");
+        let decoded = codec
+            .decode_frame_metadata(XcdrV2Wire::metadata_context(), &encoded)
+            .expect("decode metadata");
 
         assert_eq!(decoded, metadata);
         assert_eq!(
@@ -310,13 +376,9 @@ mod tests {
     fn crate_metadata() -> up_rust::UFrameMetadata {
         let topic =
             up_rust::UUri::try_from_parts("vehicle", 0x4210, 0x01, 0x9000).expect("topic URI");
-        let message = up_rust::UMessageBuilder::publish(topic)
+        up_rust::UFrameMetadata::publish(topic)
+            .with_payload_encoding(XcdrV2Wire::payload_encoding())
             .build()
-            .expect("message");
-        up_rust::UFrameMetadata::new(
-            message.attributes().clone(),
-            Some(XcdrV2Wire::payload_encoding()),
-        )
-        .expect("metadata")
+            .expect("metadata")
     }
 }

@@ -6,6 +6,7 @@
 
 use up_rust::{DecodePayload, EncodePayload, ReadDecodePayload, UWireReadDecode};
 use up_wire_xcdrv2::{VehicleSignalV1, XcdrV2Wire, VEHICLE_SIGNAL_V1_GOLDEN_VALUE};
+use up_wire_xcdrv2::VEHICLE_SIGNAL_V1_DECODE_LIMIT;
 
 fn assert_reader_decode<W>()
 where
@@ -24,6 +25,7 @@ fn main() {
     let decoded_from_reader: VehicleSignalV1 = XcdrV2Wire::decode_payload_from_reader(
         std::io::Cursor::new(&encoded),
         encoded.len(),
+        VEHICLE_SIGNAL_V1_DECODE_LIMIT,
     )
     .expect("reader decode supported XCDRv2 fixture");
     assert_eq!(decoded_from_reader, VEHICLE_SIGNAL_V1_GOLDEN_VALUE);
