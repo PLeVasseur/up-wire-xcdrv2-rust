@@ -1,0 +1,56 @@
+error[E0277]: the trait bound `Option<u32>: up_wire_xcdrv2::XcdrV2Field` is not satisfied
+ --> tests/ui/fail/unsupported_dynamic_fields.rs:9:10
+  |
+9 | #[derive(XcdrV2Type)]
+  |          ^^^^^^^^^^ the trait `up_wire_xcdrv2::XcdrV2Field` is not implemented for `Option<u32>`
+  |
+  = help: the following other types implement trait `up_wire_xcdrv2::XcdrV2Field`:
+            [T; N]
+            bool
+            f32
+            f64
+            i16
+            i32
+            i64
+            i8
+          and $N others
+  = help: see issue #48214
+  = note: this error originates in the derive macro `XcdrV2Type` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Vec<i32>: up_wire_xcdrv2::XcdrV2Field` is not satisfied
+ --> tests/ui/fail/unsupported_dynamic_fields.rs:9:10
+  |
+9 | #[derive(XcdrV2Type)]
+  |          ^^^^^^^^^^ the trait `up_wire_xcdrv2::XcdrV2Field` is not implemented for `Vec<i32>`
+  |
+  = help: the following other types implement trait `up_wire_xcdrv2::XcdrV2Field`:
+            [T; N]
+            bool
+            f32
+            f64
+            i16
+            i32
+            i64
+            i8
+          and $N others
+  = help: see issue #48214
+  = note: this error originates in the derive macro `XcdrV2Type` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `String: up_wire_xcdrv2::XcdrV2Field` is not satisfied
+ --> tests/ui/fail/unsupported_dynamic_fields.rs:9:10
+  |
+9 | #[derive(XcdrV2Type)]
+  |          ^^^^^^^^^^ the trait `up_wire_xcdrv2::XcdrV2Field` is not implemented for `String`
+  |
+  = help: the following other types implement trait `up_wire_xcdrv2::XcdrV2Field`:
+            [T; N]
+            bool
+            f32
+            f64
+            i16
+            i32
+            i64
+            i8
+          and $N others
+  = help: see issue #48214
+  = note: this error originates in the derive macro `XcdrV2Type` (in Nightly builds, run with -Z macro-backtrace for more info)

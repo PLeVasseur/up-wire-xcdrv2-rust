@@ -664,6 +664,16 @@ dependencies = [
  "static_assertions",
  "trybuild",
  "up-rust",
+ "up-wire-xcdrv2-macros",
+]
+
+[[package]]
+name = "up-wire-xcdrv2-macros"
+version = "0.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

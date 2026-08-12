@@ -6,13 +6,24 @@
 
 use up_rust::{
     EncodePayload, NativePrefixFrameMetadataCodec, PayloadCodec, PreparedTxLoanSpec,
-    UFrameMetadata, UTxBuffer, UTxLoanSpec, UUri, UVecTxBuffer, UWire, UWireMetadataCodec,
+    ReadDecodePayload, UFrameMetadata, UTxBuffer, UTxLoanSpec, UUri, UVecTxBuffer, UWire,
+    UWireMetadataCodec,
 };
 use up_wire_xcdrv2::{
-    VehicleSignalV1, XcdrV2Wire, VEHICLE_SIGNAL_V1_GOLDEN_BYTES, VEHICLE_SIGNAL_V1_GOLDEN_VALUE,
+    VehicleSignalV1, XcdrV2Mappable, XcdrV2Payload, XcdrV2Type, XcdrV2Wire,
+    VEHICLE_SIGNAL_V1_GOLDEN_BYTES, VEHICLE_SIGNAL_V1_GOLDEN_VALUE,
 };
 
 static_assertions::assert_not_impl_any!(XcdrV2Wire: up_rust::BorrowPayload<VehicleSignalV1>);
+
+#[derive(Clone, Debug, PartialEq, XcdrV2Type)]
+#[xcdr_v2(type_name = "tests.ExternalFixedPayload")]
+struct ExternalFixedPayload {
+    sequence: u32,
+    ready: bool,
+    values: [i32; 3],
+    checksum: u64,
+}
 
 #[test]
 fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
@@ -58,6 +69,45 @@ fn public_trait_bounds_accept_supported_fixture() {
     }
 
     assert_supported::<XcdrV2Wire>();
+}
+
+#[test]
+fn external_fixed_field_type_round_trips_through_final_traits() {
+    let value = ExternalFixedPayload {
+        sequence: 7,
+        ready: true,
+        values: [-1, 0, 44],
+        checksum: 0x0123_4567_89ab_cdef,
+    };
+    let encoded = XcdrV2Payload::encode(&value).expect("encode external fixed-field payload");
+
+    assert_eq!(encoded.as_bytes().len(), ExternalFixedPayload::ENCODED_LEN);
+    assert_eq!(
+        encoded.as_bytes(),
+        [
+            0x06, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff, 0xff,
+            0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0xef, 0xcd, 0xab, 0x89,
+            0x67, 0x45, 0x23, 0x01,
+        ]
+    );
+    assert_eq!(encoded.decode().expect("decode owned payload"), value);
+
+    let decoded: ExternalFixedPayload = XcdrV2Wire::decode_payload_from_reader(
+        std::io::Cursor::new(encoded.as_bytes()),
+        encoded.as_bytes().len(),
+        up_rust::PayloadDecodeLimit::new(ExternalFixedPayload::ENCODED_LEN),
+    )
+    .expect("reader decode external fixed-field payload");
+    assert_eq!(decoded, value);
+
+    let mut invalid_bool = encoded.into_bytes();
+    invalid_bool[8] = 2;
+    let result = ExternalFixedPayload::decode_xcdr_v2(&invalid_bool);
+    assert!(matches!(
+        result,
+        Err(up_rust::UWireError::InvalidPayload(message))
+            if message.contains("bool discriminant")
+    ));
 }
 
 fn metadata() -> UFrameMetadata {

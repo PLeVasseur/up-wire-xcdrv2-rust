@@ -9,6 +9,7 @@ path = "src/lib.rs"
 
 [dependencies]
 up-rust = { version = "=0.10.0-SNAPSHOT", git = "https://github.com/PLeVasseur/up-rust.git", rev = "7a82babfa7f94aed5b7aac1ac81babff20747bf2", default-features = false, features = ["selected-wire-user-api", "transport-implementer-api", "wire-implementer-api", "zero-copy-transport"] }
+up-wire-xcdrv2-macros = { version = "=0.0.0", path = "macros" }
 
 [dev-dependencies]
 static_assertions = "1.1.0"

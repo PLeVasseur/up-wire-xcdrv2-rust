@@ -1,10 +1,13 @@
-//! External XCDRv2 selected wire proof for the userializer first wave.
+//! Fixed-field XCDRv2 selected-wire support for typed uProtocol payloads.
 //!
-//! This crate deliberately supports one crate-owned integer fixture. It proves
-//! that production XCDRv2 can live outside `up-rust` while consuming only public
-//! selected-wire traits and native-prefix metadata APIs.
+//! External named-field structs can derive [`XcdrV2Type`] when every field is a
+//! supported fixed-size scalar or fixed array.
+//! Dynamic fields such as `String`, `Vec`, and `Option` are intentionally not
+//! supported.
 
-use std::{io::Read, marker::PhantomData};
+extern crate self as up_wire_xcdrv2;
+
+use std::{convert::TryInto, io::Read, marker::PhantomData};
 
 use up_rust::{
     DecodePayload, EncodePayload, PayloadCodecIdentity, PayloadDecodeLimit, PayloadEncoding,
@@ -13,6 +16,12 @@ use up_rust::{
 };
 
 const XCDR2_LE_FIXTURE_PREFIX: [u8; 4] = [0x06, 0x00, 0x00, 0x00];
+
+pub use up_wire_xcdrv2_macros::XcdrV2Type;
+
+/// Encapsulation size for little-endian PLAIN_CDR2 payloads.
+#[doc(hidden)]
+pub const XCDR_V2_ENCAPSULATION_LEN: usize = XCDR2_LE_FIXTURE_PREFIX.len();
 
 /// Payload encoding id used by the constrained first-wave XCDRv2 fixture.
 pub const XCDR_V2_ENCODING_ID: u32 = 9;
@@ -62,18 +71,332 @@ where
     type Codec = Self;
 }
 
-/// Types with explicit support in this constrained XCDRv2 fixture adapter.
+/// Fixed-size types with an explicit XCDRv2 mapping.
 pub trait XcdrV2Mappable: Sized {
-    /// Stable fixture type name used in diagnostics and content type decisions.
+    /// Stable type name used in diagnostics and content type decisions.
     const TYPE_NAME: &'static str;
-    /// Exact serialized length for this first-wave fixture encoding.
+    /// Exact serialized length, including the PLAIN_CDR2 encapsulation.
     const ENCODED_LEN: usize;
 
-    /// Encodes `self` into the frozen little-endian XCDRv2 fixture bytes.
+    /// Encodes `self` into little-endian PLAIN_CDR2 bytes.
     fn encode_xcdr_v2(&self, dst: &mut [u8]) -> Result<(), UWireError>;
 
-    /// Decodes `Self` from the frozen little-endian XCDRv2 fixture bytes.
+    /// Decodes `Self` from little-endian PLAIN_CDR2 bytes.
     fn decode_xcdr_v2(src: &[u8]) -> Result<Self, UWireError>;
+}
+
+/// Marker contract implemented by [`XcdrV2Type`] for supported external structs.
+pub trait XcdrV2Type: XcdrV2Mappable {}
+
+impl<T> XcdrV2Type for T where T: XcdrV2Mappable {}
+
+/// Fixed-size field contract used by [`XcdrV2Type`].
+#[doc(hidden)]
+pub trait XcdrV2Field: sealed::Sealed + Sized {
+    /// CDR field alignment.
+    const ALIGNMENT: usize;
+    /// Exact encoded field size.
+    const ENCODED_LEN: usize;
+
+    /// Encodes one field.
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder<'_>) -> Result<(), UWireError>;
+
+    /// Decodes one field.
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError>;
+}
+
+/// Internal fixed-size little-endian XCDRv2 encoder used by the derive.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct XcdrV2Encoder<'a> {
+    dst: &'a mut [u8],
+    offset: usize,
+}
+
+impl<'a> XcdrV2Encoder<'a> {
+    /// Creates an encoder for one exact-size payload.
+    pub fn new(dst: &'a mut [u8], encoded_len: usize) -> Result<Self, UWireError> {
+        if dst.len() < encoded_len {
+            return Err(UWireError::buffer_too_small(encoded_len, dst.len()));
+        }
+        dst[..encoded_len].fill(0);
+        Ok(Self {
+            dst: &mut dst[..encoded_len],
+            offset: 0,
+        })
+    }
+
+    /// Writes the PLAIN_CDR2 little-endian encapsulation.
+    pub fn write_encapsulation(&mut self) -> Result<(), UWireError> {
+        self.write_bytes(&XCDR2_LE_FIXTURE_PREFIX)
+    }
+
+    /// Writes fixed-width bytes after applying CDR alignment.
+    pub fn write_aligned_bytes(
+        &mut self,
+        alignment: usize,
+        bytes: &[u8],
+    ) -> Result<(), UWireError> {
+        self.align(alignment)?;
+        self.write_bytes(bytes)
+    }
+
+    /// Writes raw bytes at the current position.
+    pub fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), UWireError> {
+        let end = self
+            .offset
+            .checked_add(bytes.len())
+            .ok_or_else(|| UWireError::serialization_error("XCDRv2 offset overflow"))?;
+        if end > self.dst.len() {
+            return Err(UWireError::buffer_too_small(end, self.dst.len()));
+        }
+        self.dst[self.offset..end].copy_from_slice(bytes);
+        self.offset = end;
+        Ok(())
+    }
+
+    /// Verifies that the exact fixed-size payload was produced.
+    pub fn finish(self) -> Result<(), UWireError> {
+        if self.offset != self.dst.len() {
+            return Err(UWireError::serialization_error(format!(
+                "XCDRv2 encoded {} bytes, expected {}",
+                self.offset,
+                self.dst.len()
+            )));
+        }
+        Ok(())
+    }
+
+    fn align(&mut self, alignment: usize) -> Result<(), UWireError> {
+        if !alignment.is_power_of_two() {
+            return Err(UWireError::serialization_error(format!(
+                "invalid XCDRv2 alignment {alignment}"
+            )));
+        }
+        let padding = padding_for(self.offset, alignment);
+        let end = self
+            .offset
+            .checked_add(padding)
+            .ok_or_else(|| UWireError::serialization_error("XCDRv2 offset overflow"))?;
+        if end > self.dst.len() {
+            return Err(UWireError::buffer_too_small(end, self.dst.len()));
+        }
+        self.offset = end;
+        Ok(())
+    }
+}
+
+/// Internal fixed-size little-endian XCDRv2 decoder used by the derive.
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub struct XcdrV2Decoder<'a> {
+    src: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> XcdrV2Decoder<'a> {
+    /// Creates a decoder for one exact-size payload.
+    pub fn new(src: &'a [u8], encoded_len: usize) -> Result<Self, UWireError> {
+        if src.len() != encoded_len {
+            return Err(UWireError::invalid_payload_length(encoded_len, src.len()));
+        }
+        Ok(Self { src, offset: 0 })
+    }
+
+    /// Reads and validates the PLAIN_CDR2 little-endian encapsulation.
+    pub fn read_encapsulation(&mut self) -> Result<(), UWireError> {
+        if self.read_exact(XCDR_V2_ENCAPSULATION_LEN)? != XCDR2_LE_FIXTURE_PREFIX {
+            return Err(UWireError::invalid_payload(
+                "unsupported XCDRv2 fixture prefix or endian/version",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Reads fixed-width bytes after applying CDR alignment.
+    pub fn read_aligned_bytes(
+        &mut self,
+        alignment: usize,
+        len: usize,
+    ) -> Result<&'a [u8], UWireError> {
+        self.align(alignment)?;
+        self.read_exact(len)
+    }
+
+    /// Verifies that the entire fixed-size payload was consumed.
+    pub fn finish(self) -> Result<(), UWireError> {
+        if self.offset != self.src.len() {
+            return Err(UWireError::invalid_payload(format!(
+                "XCDRv2 payload has {} trailing bytes",
+                self.src.len() - self.offset
+            )));
+        }
+        Ok(())
+    }
+
+    fn read_exact(&mut self, len: usize) -> Result<&'a [u8], UWireError> {
+        let end = self
+            .offset
+            .checked_add(len)
+            .ok_or_else(|| UWireError::invalid_payload("XCDRv2 offset overflow"))?;
+        if end > self.src.len() {
+            return Err(UWireError::invalid_payload(format!(
+                "XCDRv2 payload ended at byte {}, needed byte {end}",
+                self.src.len()
+            )));
+        }
+        let bytes = &self.src[self.offset..end];
+        self.offset = end;
+        Ok(bytes)
+    }
+
+    fn align(&mut self, alignment: usize) -> Result<(), UWireError> {
+        if !alignment.is_power_of_two() {
+            return Err(UWireError::serialization_error(format!(
+                "invalid XCDRv2 alignment {alignment}"
+            )));
+        }
+        let padding = padding_for(self.offset, alignment);
+        self.offset = self
+            .offset
+            .checked_add(padding)
+            .ok_or_else(|| UWireError::invalid_payload("XCDRv2 offset overflow"))?;
+        if self.offset > self.src.len() {
+            return Err(UWireError::invalid_payload(
+                "XCDRv2 padding exceeds payload length",
+            ));
+        }
+        Ok(())
+    }
+}
+
+macro_rules! xcdr_scalar {
+    ($ty:ty, $alignment:expr, $to_bytes:ident, $from_bytes:ident) => {
+        impl sealed::Sealed for $ty {}
+
+        impl XcdrV2Field for $ty {
+            const ALIGNMENT: usize = $alignment;
+            const ENCODED_LEN: usize = ::core::mem::size_of::<$ty>();
+
+            fn encode_field(&self, encoder: &mut XcdrV2Encoder<'_>) -> Result<(), UWireError> {
+                encoder.write_aligned_bytes($alignment, &self.$to_bytes())
+            }
+
+            fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+                let bytes = decoder.read_aligned_bytes($alignment, Self::ENCODED_LEN)?;
+                Ok(<$ty>::$from_bytes(
+                    bytes.try_into().expect("fixed-width XCDRv2 scalar"),
+                ))
+            }
+        }
+    };
+}
+
+xcdr_scalar!(u16, 2, to_le_bytes, from_le_bytes);
+xcdr_scalar!(i16, 2, to_le_bytes, from_le_bytes);
+xcdr_scalar!(u32, 4, to_le_bytes, from_le_bytes);
+xcdr_scalar!(i32, 4, to_le_bytes, from_le_bytes);
+xcdr_scalar!(u64, 8, to_le_bytes, from_le_bytes);
+xcdr_scalar!(i64, 8, to_le_bytes, from_le_bytes);
+xcdr_scalar!(f32, 4, to_le_bytes, from_le_bytes);
+xcdr_scalar!(f64, 8, to_le_bytes, from_le_bytes);
+
+impl sealed::Sealed for u8 {}
+
+impl XcdrV2Field for u8 {
+    const ALIGNMENT: usize = 1;
+    const ENCODED_LEN: usize = 1;
+
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder<'_>) -> Result<(), UWireError> {
+        encoder.write_bytes(&[*self])
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        Ok(decoder.read_exact(1)?[0])
+    }
+}
+
+impl sealed::Sealed for i8 {}
+
+impl XcdrV2Field for i8 {
+    const ALIGNMENT: usize = 1;
+    const ENCODED_LEN: usize = 1;
+
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder<'_>) -> Result<(), UWireError> {
+        (*self as u8).encode_field(encoder)
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        Ok(u8::decode_field(decoder)? as i8)
+    }
+}
+
+impl sealed::Sealed for bool {}
+
+impl XcdrV2Field for bool {
+    const ALIGNMENT: usize = 1;
+    const ENCODED_LEN: usize = 1;
+
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder<'_>) -> Result<(), UWireError> {
+        u8::from(*self).encode_field(encoder)
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        match u8::decode_field(decoder)? {
+            0 => Ok(false),
+            1 => Ok(true),
+            other => Err(UWireError::invalid_payload(format!(
+                "invalid XCDRv2 bool discriminant {other}"
+            ))),
+        }
+    }
+}
+
+impl<T, const N: usize> sealed::Sealed for [T; N] where T: XcdrV2Field {}
+
+impl<T, const N: usize> XcdrV2Field for [T; N]
+where
+    T: XcdrV2Field,
+{
+    const ALIGNMENT: usize = if N == 0 { 1 } else { T::ALIGNMENT };
+    const ENCODED_LEN: usize = T::ENCODED_LEN * N;
+
+    fn encode_field(&self, encoder: &mut XcdrV2Encoder<'_>) -> Result<(), UWireError> {
+        for value in self {
+            value.encode_field(encoder)?;
+        }
+        Ok(())
+    }
+
+    fn decode_field(decoder: &mut XcdrV2Decoder<'_>) -> Result<Self, UWireError> {
+        let mut values = Vec::with_capacity(N);
+        for _ in 0..N {
+            values.push(T::decode_field(decoder)?);
+        }
+        values.try_into().map_err(|_| {
+            UWireError::serialization_error("internal XCDRv2 array decode length mismatch")
+        })
+    }
+}
+
+/// Calculates the end offset of one fixed-size aligned field.
+#[doc(hidden)]
+#[must_use]
+pub const fn xcdr_v2_field_end(position: usize, alignment: usize, len: usize) -> usize {
+    position + padding_for(position, alignment) + len
+}
+
+const fn padding_for(position: usize, alignment: usize) -> usize {
+    let remainder = position % alignment;
+    if remainder == 0 {
+        0
+    } else {
+        alignment - remainder
+    }
+}
+
+mod sealed {
+    pub trait Sealed {}
 }
 
 /// Owned encoded XCDRv2 payload bytes for a supported fixture type.

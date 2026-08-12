@@ -1,8 +1,12 @@
 # up-wire-xcdrv2-rust
 
-External `XcdrV2Wire` proof crate for the userializer first wave.
+External fixed-field `XcdrV2Wire` crate for the userializer first wave.
 
-This crate intentionally implements only the constrained `VehicleSignalV1`
-little-endian XCDRv2 fixture adapter needed by `USR-05X`. It uses public
-`up-rust` selected-wire traits and native-prefix metadata APIs only; broad
-XTypes/codegen support is out of first-wave scope.
+`#[derive(up_wire_xcdrv2::XcdrV2Type)]` maps an external named-field struct
+whose fields are fixed-size scalars or fixed arrays into little-endian
+PLAIN_CDR2 bytes. The crate also retains the constrained `VehicleSignalV1`
+fixture and uses only public `up-rust` selected-wire traits and native-prefix
+metadata APIs.
+
+Dynamic strings, vectors, optionals, unions, and broad XTypes/codegen support
+remain intentionally unsupported.
