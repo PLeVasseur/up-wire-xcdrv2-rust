@@ -23,8 +23,9 @@ pub use up_wire_xcdrv2_macros::XcdrV2Type;
 #[doc(hidden)]
 pub const XCDR_V2_ENCAPSULATION_LEN: usize = XCDR2_LE_FIXTURE_PREFIX.len();
 
-/// Payload encoding id used by the constrained first-wave XCDRv2 fixture.
-pub const XCDR_V2_ENCODING_ID: u32 = 9;
+/// Deployment-private encoding for this constrained PLAIN_CDR2 profile.
+/// Peers must agree to reserve this ID for the documented representation.
+pub const XCDR_V2_ENCODING_ID: u32 = 0xF001;
 
 /// Payload content type for the frozen `VehicleSignalV1` fixture.
 pub const VEHICLE_SIGNAL_V1_CONTENT_TYPE: &str =
@@ -692,7 +693,7 @@ mod tests {
         assert_eq!(decoded, metadata);
         assert_eq!(
             decoded.payload_encoding(),
-            Some(&XcdrV2Wire::payload_encoding())
+            Some(&XcdrV2Wire::payload_encoding(None).expect("fixed XCDRv2 profile"))
         );
     }
 
@@ -700,7 +701,9 @@ mod tests {
         let topic =
             up_rust::UUri::try_from_parts("vehicle", 0x4210, 0x01, 0x9000).expect("topic URI");
         up_rust::UFrameMetadata::publish(topic)
-            .with_payload_encoding(XcdrV2Wire::payload_encoding())
+            .with_payload_encoding(
+                XcdrV2Wire::payload_encoding(None).expect("fixed XCDRv2 profile"),
+            )
             .build()
             .expect("metadata")
     }

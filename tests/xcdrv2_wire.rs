@@ -113,7 +113,7 @@ fn external_fixed_field_type_round_trips_through_final_traits() {
 fn metadata() -> UFrameMetadata {
     let topic = UUri::try_from_parts("vehicle", 0x4210, 0x01, 0x9000).expect("topic URI");
     UFrameMetadata::publish(topic)
-        .with_payload_encoding(XcdrV2Wire::payload_encoding())
+        .with_payload_encoding(XcdrV2Wire::payload_encoding(None).expect("fixed XCDRv2 profile"))
         .build()
         .expect("metadata")
 }
