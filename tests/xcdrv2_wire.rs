@@ -5,12 +5,25 @@
  ********************************************************************************/
 
 use up_rust::{
-    EncodePayload, PayloadCodec, PreparedTxLoanSpec, UFrameMetadata, UMessageBuilder, UTxBuffer,
-    UTxLoanSpec, UUri, UVecTxBuffer, UWireMetadata, ValidatedTxLoanSpec,
+    EncodePayload, NativePrefixFrameMetadataCodec, PayloadCodec, PreparedTxLoanSpec,
+    ReadDecodePayload, UFrameMetadata, UTxBuffer, UTxLoanSpec, UUri, UVecTxBuffer, UWire,
+    UWireMetadataCodec,
 };
 use up_wire_xcdrv2::{
-    VehicleSignalV1, XcdrV2Wire, VEHICLE_SIGNAL_V1_GOLDEN_BYTES, VEHICLE_SIGNAL_V1_GOLDEN_VALUE,
+    VehicleSignalV1, XcdrV2Mappable, XcdrV2Payload, XcdrV2Type, XcdrV2Wire,
+    VEHICLE_SIGNAL_V1_GOLDEN_BYTES, VEHICLE_SIGNAL_V1_GOLDEN_VALUE,
 };
+
+static_assertions::assert_not_impl_any!(XcdrV2Wire: up_rust::BorrowPayload<VehicleSignalV1>);
+
+#[derive(Clone, Debug, PartialEq, XcdrV2Type)]
+#[xcdr_v2(type_name = "tests.ExternalFixedPayload")]
+struct ExternalFixedPayload {
+    sequence: u32,
+    ready: bool,
+    values: [i32; 3],
+    checksum: u64,
+}
 
 #[test]
 fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
@@ -19,14 +32,17 @@ fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
         .expect("measure XCDRv2 payload");
     let spec = UTxLoanSpec::payload(metadata.clone(), layout.len(), layout.align())
         .expect("create TX loan spec");
-    let prepared = PreparedTxLoanSpec::from_validated::<XcdrV2Wire>(
-        ValidatedTxLoanSpec::try_from(spec).expect("validate TX loan spec"),
-    )
-    .expect("prepare selected-wire TX");
+    let codec = NativePrefixFrameMetadataCodec;
+    let prepared =
+        PreparedTxLoanSpec::from_validated::<XcdrV2Wire, NativePrefixFrameMetadataCodec>(
+            spec, &codec,
+        )
+        .expect("prepare selected-wire TX");
 
     assert_eq!(prepared.payload_len(), VEHICLE_SIGNAL_V1_GOLDEN_BYTES.len());
     assert_eq!(prepared.payload_alignment(), 1);
-    let decoded_metadata = XcdrV2Wire::decode_frame_metadata(prepared.encoded_metadata())
+    let decoded_metadata = codec
+        .decode_frame_metadata(XcdrV2Wire::metadata_context(), prepared.encoded_metadata())
         .expect("decode prepared metadata");
     assert_eq!(decoded_metadata, metadata);
 
@@ -46,8 +62,7 @@ fn serialized_zero_copy_tx_fixture_writes_xcdrv2_bytes_into_loan() {
 fn public_trait_bounds_accept_supported_fixture() {
     fn assert_supported<W>()
     where
-        W: up_rust::UWireMetadata
-            + up_rust::UWireEncode<VehicleSignalV1>
+        W: up_rust::UWireEncode<VehicleSignalV1>
             + for<'a> up_rust::UWireDecode<'a, VehicleSignalV1>
             + up_rust::UWireReadDecode<VehicleSignalV1>,
     {
@@ -56,12 +71,49 @@ fn public_trait_bounds_accept_supported_fixture() {
     assert_supported::<XcdrV2Wire>();
 }
 
+#[test]
+fn external_fixed_field_type_round_trips_through_final_traits() {
+    let value = ExternalFixedPayload {
+        sequence: 7,
+        ready: true,
+        values: [-1, 0, 44],
+        checksum: 0x0123_4567_89ab_cdef,
+    };
+    let encoded = XcdrV2Payload::encode(&value).expect("encode external fixed-field payload");
+
+    assert_eq!(encoded.as_bytes().len(), ExternalFixedPayload::ENCODED_LEN);
+    assert_eq!(
+        encoded.as_bytes(),
+        [
+            0x06, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff, 0xff,
+            0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0xef, 0xcd, 0xab, 0x89,
+            0x67, 0x45, 0x23, 0x01,
+        ]
+    );
+    assert_eq!(encoded.decode().expect("decode owned payload"), value);
+
+    let decoded: ExternalFixedPayload = XcdrV2Wire::decode_payload_from_reader(
+        std::io::Cursor::new(encoded.as_bytes()),
+        encoded.as_bytes().len(),
+        up_rust::PayloadDecodeLimit::new(ExternalFixedPayload::ENCODED_LEN),
+    )
+    .expect("reader decode external fixed-field payload");
+    assert_eq!(decoded, value);
+
+    let mut invalid_bool = encoded.into_bytes();
+    invalid_bool[8] = 2;
+    let result = ExternalFixedPayload::decode_xcdr_v2(&invalid_bool);
+    assert!(matches!(
+        result,
+        Err(up_rust::UWireError::InvalidPayload(message))
+            if message.contains("bool discriminant")
+    ));
+}
+
 fn metadata() -> UFrameMetadata {
     let topic = UUri::try_from_parts("vehicle", 0x4210, 0x01, 0x9000).expect("topic URI");
-    let message = UMessageBuilder::publish(topic).build().expect("message");
-    UFrameMetadata::new(
-        message.attributes().clone(),
-        Some(XcdrV2Wire::payload_encoding()),
-    )
-    .expect("metadata")
+    UFrameMetadata::publish(topic)
+        .with_payload_encoding(XcdrV2Wire::payload_encoding(None).expect("fixed XCDRv2 profile"))
+        .build()
+        .expect("metadata")
 }

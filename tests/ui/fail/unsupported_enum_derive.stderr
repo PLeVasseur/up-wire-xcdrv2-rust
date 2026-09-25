@@ -1,0 +1,5 @@
+error: XcdrV2Type derive supports structs only
+  --> tests/ui/fail/unsupported_enum_derive.rs:10:6
+   |
+10 | enum UnsupportedEnum {
+   |      ^^^^^^^^^^^^^^^

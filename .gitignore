@@ -1,1 +1,3 @@
 /target/
+/macros/Cargo.lock
+/macros/target/
