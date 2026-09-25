@@ -2,13 +2,16 @@
 name = "up-wire-xcdrv2"
 version = "0.0.0"
 edition = "2021"
+license = "Apache-2.0"
 publish = false
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-up-rust = { path = "../up-rust", default-features = false }
+up-rust = { version = "=0.10.0-SNAPSHOT", git = "https://github.com/PLeVasseur/up-rust.git", rev = "4c786f83fd03f22ba4e7a4e9af0846ae79ecf852", default-features = false, features = ["selected-wire-user-api", "transport-implementer-api", "wire-implementer-api", "zero-copy-transport"] }
+up-wire-xcdrv2-macros = { version = "=0.0.0", path = "macros" }
 
 [dev-dependencies]
+static_assertions = "1.1.0"
 trybuild = "1.0.114"
